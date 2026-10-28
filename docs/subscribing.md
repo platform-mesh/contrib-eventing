@@ -55,10 +55,8 @@ Subscription stops delivery.
 
 ## Limits in milestone 1
 
-- An endpoint that keeps failing delays delivery to every other Subscription
-  and causes duplicates for all of them, because the in-memory channel waits
-  for its retries.
-- Replies are not blocked: an endpoint that answers with a CloudEvent injects
-  that event into the platform stream, past the ingress.
-- Any sink URL is accepted, and events are lost when the in-memory channel
-  restarts.
+- Replies are not blocked yet: an endpoint that answers with a CloudEvent
+  injects that event into the platform stream, past the ingress. This is fixed
+  before a first consumer (milestone 2).
+- Any sink URL is accepted, and events not yet delivered are lost when the
+  in-memory channel restarts.

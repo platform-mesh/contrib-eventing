@@ -63,7 +63,8 @@ If eventing is not installed, Platform Mesh works exactly as before.
 
 - At least once: a subscriber can get the same event more than once and should ignore duplicates by event `id`.
 - No ordering across events. In particular a role change arrives as two events (revoked and granted) in any order.
-- The in-memory channel used for development loses events on restart. Production needs a durable broker class such as Kafka.
+- The broker channel accepts an event before it delivers it, so a subscriber that keeps failing only delays itself.
+- The in-memory channel used for development loses events on restart, including events not yet delivered. Production needs a durable broker class such as Kafka.
 
 ## Known gaps
 
@@ -72,6 +73,5 @@ These came out of the [spike](https://github.com/platform-mesh/backlog/issues/42
 - The Knative broker ingress accepts any event from inside the cluster, which is why our own ingress sits in front of it. A NetworkPolicy lets only our ingress (and Knative itself) reach the broker ingress.
 - The ingress accepts only the platform's own adapters so far. Providers publishing events for their orgs is not built yet.
 - Subscriptions accept any URL. Targets should be limited by an allowlist that the platform operator controls.
-- A subscriber that answers with a CloudEvent injects it into the stream: Knative treats the answer as a reply and sends it back to the broker, past our ingress.
-- A subscriber that keeps failing delays delivery to all others. The in-memory channel waits for its retries, the broker does not answer the ingress in time, and the adapter publishes the event again, so every subscriber gets duplicates.
+- A subscriber that answers with a CloudEvent injects it into the stream: Knative treats the answer as a reply and sends it back to the broker, past our ingress. Accepted for milestone 1, to be fixed before a first consumer. Dropping the `knative-eventing` rule from the NetworkPolicy blocks replies; Knative OIDC with an EventPolicy would reject them properly.
 - The ingress is reachable at `eventing.services.<domain>` through the `terminate-services` listener of the platform Gateway. In the kind setup the platform certificate covers `*.<domain>` but not `*.services.<domain>`, so that host gets Traefik's default certificate.
