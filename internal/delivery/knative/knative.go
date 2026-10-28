@@ -16,15 +16,23 @@ import (
 	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"github.com/platform-mesh/contrib-eventing/internal/delivery"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
-// BrokerName is the name of the one Broker.
-const BrokerName = "default"
+const (
+	// BrokerName is the name of the one Broker.
+	BrokerName = "default"
+
+	// asyncHandlerAnnotation makes the Broker's channel accept an event before
+	// it is delivered. Without it the channel waits for every Trigger, retries
+	// included, so one failing sink holds up the ingress and the adapter
+	// publishes the event again to everyone. Knative copies the annotation from
+	// the Broker to the channel.
+	asyncHandlerAnnotation = "messaging.knative.dev/async-handler"
+)
 
 var (
 	brokerGVK  = schema.GroupVersionKind{Group: "eventing.knative.dev", Version: "v1", Kind: "Broker"}
@@ -73,7 +81,16 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 	br.SetGroupVersionKind(brokerGVK)
 	br.SetNamespace(b.Namespace)
 	br.SetName(BrokerName)
-	if err := b.Client.Create(ctx, br); err != nil && !apierrors.IsAlreadyExists(err) {
+	_, err := controllerutil.CreateOrUpdate(ctx, b.Client, br, func() error {
+		annotations := br.GetAnnotations()
+		if annotations == nil {
+			annotations = map[string]string{}
+		}
+		annotations[asyncHandlerAnnotation] = "true"
+		br.SetAnnotations(annotations)
+		return nil
+	})
+	if err != nil {
 		return fmt.Errorf("broker %s/%s: %w", b.Namespace, BrokerName, err)
 	}
 	return nil
