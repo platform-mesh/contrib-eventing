@@ -223,5 +223,9 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: contrib-eventing}
           podSelector:
             matchLabels: {app: ingress}
+        # TODO: this rule lets replies through, and a reply can be any event a
+        # sink makes up, so it reaches subscribers without passing our ingress.
+        # Dropping the rule blocks replies (tested, e2e passes); Knative OIDC
+        # with an EventPolicy would reject them properly. See docs/roadmap.md.
         - namespaceSelector:
             matchLabels: {kubernetes.io/metadata.name: knative-eventing}

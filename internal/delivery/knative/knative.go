@@ -98,6 +98,11 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 
 // triggerSpec translates a Subscription into a Trigger spec. Knative delivers
 // an event only if every filter matches: one for the types, one for the orgs.
+//
+// TODO: if the sink answers with a CloudEvent, Knative publishes it into the
+// Broker as a reply, past our ingress. Triggers cannot tell replies apart, so
+// this has to be blocked in front of the Broker (see the NetworkPolicy in
+// config/deploy/eventing.yaml).
 func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 	filters := []any{anyOf("type", sub.Spec.Filter.Types)}
 	if len(sub.Spec.Filter.Orgs) > 0 {
