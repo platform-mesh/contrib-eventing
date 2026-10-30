@@ -26,7 +26,7 @@ pf_log=$(mktemp)
 # kubectl directly, not the kind_kubectl function, so $! is the kubectl process.
 kubectl --context "$KUBE_CONTEXT" -n platform-mesh-system port-forward svc/openfga :8080 >"$pf_log" &
 pf=$!
-trap 'kill $pf; rm -f "$pf_log"' EXIT
+trap 'kill $pf; wait $pf 2>/dev/null || true; rm -f "$pf_log"' EXIT
 fga_port() { sed -n 's/^Forwarding from 127.0.0.1:\([0-9]*\).*/\1/p' "$pf_log" | grep .; }
 wait_for "OpenFGA port-forward" 15 fga_port
 fga=localhost:$(fga_port)

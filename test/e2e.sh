@@ -78,35 +78,37 @@ grep -q "pmorg: $neworg" <<<"$(last_event granted)" && pass "owner grant of $new
 kcp root:orgs delete account "$neworg" --wait=false >/dev/null
 
 log "Accounts with the same name have different ids"
-# Only events after this point count; earlier runs used the same account names.
+# A fresh name: Platform Mesh keeps the tuples of deleted accounts, so an owner
+# grant for a name used before is no change and no event.
+acc=e2e-account-$RANDOM
 seen=$(sink_logs | wc -l)
 # Created as the demo user, who becomes owner; the owner grant is the event.
 kcp "root:orgs:$ORG" apply --as "$DEMO_USER" -f - >/dev/null <<EOF
 apiVersion: core.platform-mesh.io/v1alpha1
 kind: Account
 metadata:
-  name: e2e-account
+  name: $acc
 spec:
   type: account
 EOF
-kcp "root:orgs:$ORG" wait --for=condition=Ready account/e2e-account --timeout=180s >/dev/null
-kcp "root:orgs:$ORG:e2e-account" apply --as "$DEMO_USER" -f - >/dev/null <<EOF
+kcp "root:orgs:$ORG" wait --for=condition=Ready "account/$acc" --timeout=180s >/dev/null
+kcp "root:orgs:$ORG:$acc" apply --as "$DEMO_USER" -f - >/dev/null <<EOF
 apiVersion: core.platform-mesh.io/v1alpha1
 kind: Account
 metadata:
-  name: e2e-account
+  name: $acc
 spec:
   type: account
 EOF
-kcp "root:orgs:$ORG:e2e-account" wait --for=condition=Ready account/e2e-account --timeout=180s >/dev/null
+kcp "root:orgs:$ORG:$acc" wait --for=condition=Ready "account/$acc" --timeout=180s >/dev/null
 # Each account's owner grant names the workspace that holds the Account.
-outer=$(kcp "root:orgs:$ORG" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/e2e-account
-inner=$(kcp "root:orgs:$ORG:e2e-account" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/e2e-account
+outer=$(kcp "root:orgs:$ORG" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/$acc
+inner=$(kcp "root:orgs:$ORG:$acc" get accountinfo account -o jsonpath='{.spec.account.generatedClusterId}')/$acc
 announced() { grep -q "subject: accounts/$1" <<<"$(sink_logs | tail -n +$((seen + 1)))"; }
 wait_for "owner grant for the outer account" 30 announced "$outer" && pass "subject accounts/$outer"
 wait_for "owner grant for the inner account" 30 announced "$inner" && pass "subject accounts/$inner"
-kcp "root:orgs:$ORG:e2e-account" delete account e2e-account --wait=false >/dev/null
-kcp "root:orgs:$ORG" delete account e2e-account --wait=false >/dev/null
+kcp "root:orgs:$ORG:$acc" delete account "$acc" --wait=false >/dev/null
+kcp "root:orgs:$ORG" delete account "$acc" --wait=false >/dev/null
 
 log "A Subscription limited to other orgs gets nothing"
 admin patch subscription $sub --type merge -p '{"spec":{"filter":{"orgs":["someone-else"]}}}' >/dev/null
