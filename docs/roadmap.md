@@ -11,13 +11,15 @@ Each milestone ends with something that runs on a local kind setup.
    script adds all of this to a local Platform Mesh.
 2. **Ready for a first consumer.** Subscription targets limited by an
    allowlist the platform operator controls, replies from subscribers blocked,
-   a durable broker class instead of the in-memory channel, dead letter sinks, and the contract checked with the
-   first consumer (snapshots).
+   dead letter sinks, and the contract checked with the
+   first consumer (snapshots). Details and open questions:
+   [milestone 2](milestone-2.md).
 3. **Keycloak events.** Login, user created and user deleted, from a Keycloak
    adapter. A prototype for login exists.
 4. **Installable module.** Published images and chart, install through
    `ManagedProvider`, automatic binding for new orgs, more than one shard,
-   installations other than kind.
+   installations other than kind, a durable broker class instead of the
+   in-memory channel.
 5. **Later.** Org- and account-level subscriptions, kcp resource events.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
