@@ -11,7 +11,8 @@ info:
 
     Answer with a 2xx status and an empty body, quickly. A non-empty body that
     is not a CloudEvent counts as a failed delivery. A body that is a
-    CloudEvent is taken as a reply and published again, so never send one.
+    CloudEvent is taken as a reply. Replies are blocked; with a dead letter
+    sink the event you replied to also goes there.
 
     Delivery is at least once and unordered: drop events whose `ce-id` you have
     already seen.
@@ -49,11 +50,7 @@ webhooks:
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
-        '404':
-          $ref: '#/components/responses/Retried'
         '408':
-          $ref: '#/components/responses/Retried'
-        '409':
           $ref: '#/components/responses/Retried'
         '429':
           $ref: '#/components/responses/Retried'
@@ -82,11 +79,42 @@ webhooks:
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
-        '404':
-          $ref: '#/components/responses/Retried'
         '408':
           $ref: '#/components/responses/Retried'
-        '409':
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
+  accountMembers:
+    post:
+      operationId: accountMembers
+      summary: The members of an account changed; this is the full list now.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.account.members.v1alpha1
+        - $ref: '#/components/parameters/ceSubject'
+        - name: ce-time
+          in: header
+          required: true
+          description: When the list was read. Keep the snapshot with the latest time.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/AccountMembers'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '408':
           $ref: '#/components/responses/Retried'
         '429':
           $ref: '#/components/responses/Retried'
@@ -106,7 +134,7 @@ components:
       name: ce-id
       in: header
       required: true
-      description: Unique per change and the same on every redelivery. Use it to drop duplicates; do not parse it.
+      description: Unique per event and the same on every redelivery. Use it to drop duplicates; do not parse it.
       schema:
         type: string
       example: 3d95f792518d1253545ad05aa72c9044
@@ -153,16 +181,35 @@ components:
             org: acme
             account: team-a
             accountId: a5zld11wopsu1uea/team-a
+            accountPath: root:orgs:acme:team-a
             role: member
             user:
               id: alice@example.com
+    AccountMembers:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AccountMembers'
+          example:
+            org: acme
+            account: team-a
+            accountId: a5zld11wopsu1uea/team-a
+            accountPath: root:orgs:acme:team-a
+            members:
+              - user:
+                  id: alice@example.com
+                roles: [owner]
+              - user:
+                  id: bob@example.com
+                roles: [member]
   responses:
     Delivered:
       description: Delivered. The body must be empty.
     Retried:
       description: Failed for now; delivered again with backoff, up to the Subscription's retry count.
     Failed:
-      description: Any other status is a failed delivery and is not retried.
+      description: Any other status is a failed delivery. It is not retried and does not go to the dead letter sink.
   schemas:
     Membership:
       type: object
@@ -179,11 +226,48 @@ components:
           description: |
             The account, unique in the platform: the logical cluster of the workspace that
             holds the Account object and the account name (AccountInfo originClusterId/name).
+        accountPath:
+          type: string
+          description: |
+            The account's kcp workspace path, as the iam-service API uses it. Missing if the
+            workspace that holds the Account was gone when the event was built.
         role:
           type: string
           description: Platform Mesh role, for example owner or member.
         user:
           $ref: '#/components/schemas/User'
+    AccountMembers:
+      type: object
+      required: [org, account, accountId, members]
+      properties:
+        org:
+          type: string
+          description: Org name.
+        account:
+          type: string
+          description: Account name. Nested accounts can share a name.
+        accountId:
+          type: string
+          description: The account, as in Membership.
+        accountPath:
+          type: string
+          description: The account's kcp workspace path, as in Membership.
+        members:
+          type: array
+          description: Everyone with a role on the account, sorted by user id. Empty if the account was deleted.
+          items:
+            $ref: '#/components/schemas/Member'
+    Member:
+      type: object
+      required: [user, roles]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        roles:
+          type: array
+          description: The user's roles on the account, sorted.
+          items:
+            type: string
     User:
       type: object
       required: [id]

@@ -29,6 +29,7 @@ Sent when a user gets or loses a role on an account.
     "org": "acme",
     "account": "team-a",
     "accountId": "a5zld11wopsu1uea/team-a",
+    "accountPath": "root:orgs:acme:team-a",
     "role": "member",
     "user": { "id": "alice@example.com" }
   }
@@ -53,18 +54,17 @@ Sent when a user gets or loses a role on an account.
 | `org` | yes | org name |
 | `account` | yes | account name. Nested accounts can share a name, so don't use it as a key. |
 | `accountId` | yes | the account, unique in the platform: the logical cluster of the workspace that holds the Account object, and the account name. It is the same pair the account's `AccountInfo` shows as `originClusterId` and `name`. |
-| `accountPath` | planned | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. See [milestone 2](milestone-2.md). |
+| `accountPath` | no | the account's kcp workspace path, for example `root:orgs:acme:team-a`. The iam-service API addresses accounts by it. Missing if the account was deleted before eventing saw it, for example while the adapter was restarting. |
 | `role` | yes | Platform Mesh role, for example `owner` or `member` |
 | `user.id` | yes | the user as Platform Mesh identifies them, see below |
 
 Users are identified the way the platform admin configured Platform Mesh: by the user claim security-operator uses (`--user-claim`, `email` by default). `user.id` is the value Platform Mesh authorizes the user with, so with the default it is the email. Invitations are always written with the email, so with the `sub` claim an invited user who never logged in appears with their email.
 
-## Members snapshot (planned)
+## Members snapshot
 
-Not built yet, see [milestone 2](milestone-2.md). Sent after the members of an
-account changed. It carries the full list as it is in the authorization engine
-when the event is built, so a subscriber that keeps member lists can replace
-its copy instead of applying changes.
+Sent after the members of an account changed. It carries the full list as it
+is in the authorization engine when the event is built, so a subscriber that
+keeps member lists can replace its copy instead of applying changes.
 
 | Type | Meaning |
 | --- | --- |
@@ -94,21 +94,29 @@ its copy instead of applying changes.
 ```
 
 Attributes and the fields `org`, `account`, `accountId`, `accountPath` and
-`user.id` mean the same as for membership events. `time` is when the list was read. Several
-changes to one account can lead to a single snapshot.
+`user.id` mean the same as for membership events. `time` is when the list was read. `members` is
+sorted by `user.id`, `roles` by name. Several changes to one account can lead
+to a single snapshot.
 
 - **Keep the newest.** Snapshots can arrive in any order; use the one with the
   latest `time`.
+- **Same id, same list.** A retried snapshot keeps its `id` only if the list is
+  the same. If the members changed in between, it is a new event with a new `id`.
+- **Explicit roles only.** A role given to everyone (`user:*`) is not listed,
+  and owners are not listed as members unless they also have the member role.
 - **An empty list** means the account has no members, for example after it was
   deleted.
 - **No names.** The list has user ids only.
+- **Only on change.** A snapshot is sent when the account's members change. A
+  new Subscription, or one that missed a snapshot, gets an account's list with
+  that account's next change.
 
 ## What subscribers should expect
 
 - **Duplicates.** Delivery is at least once. Drop events whose `id` you have already seen.
 - **No ordering.** A role change arrives as a revoke of the old role and a grant of the new one, in either order.
-- **Account deletion** shows up as one revoke per member. There is no separate event for it yet.
-- **Org deletion** produces no membership events.
+- **Account deletion** shows up as one revoke per member and a snapshot with an empty list. There is no separate event for it yet.
+- **Org deletion** produces no events.
 - **Nothing from before eventing was installed.** Older changes are not replayed. Orgs created later are covered from their first change.
 - **Account creation** shows up as an owner grant for the creator.
 

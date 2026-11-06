@@ -94,7 +94,14 @@ func runSubscriptionController(_ *cobra.Command, _ []string) { // coverage-ignor
 	if err != nil {
 		log.Fatal().Err(err).Msg("unable to create client for the local cluster")
 	}
-	r := &subscription.Reconciler{Manager: mgr, Delivery: &knative.Backend{Client: localClient, Namespace: subscriptionControllerCfg.BrokerNamespace}}
+	r := &subscription.Reconciler{
+		Manager:          mgr,
+		Delivery:         &knative.Backend{Client: localClient, Namespace: subscriptionControllerCfg.BrokerNamespace},
+		AllowedSinkHosts: subscriptionControllerCfg.AllowedSinkHosts,
+	}
+	if len(r.AllowedSinkHosts) == 0 {
+		log.Warn().Msg("no --allowed-sink-hosts: no Subscription will get events")
+	}
 	if err := r.SetupWithManager(mgr); err != nil {
 		log.Fatal().Err(err).Msg("unable to create controller")
 	}

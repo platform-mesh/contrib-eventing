@@ -101,8 +101,10 @@ reading them needs Keycloak access, which comes with milestone 3. Until then
 subscribers that need names look them up themselves.
 
 **NetworkPolicy or EventPolicies for replies.** The NetworkPolicy is a small
-change and tested. A blocked reply is retried for about 90 seconds and then
-dropped, which is harmless because delivery runs in the background. The proper
+change and tested. The subscriber gets the event once; the blocked reply is
+retried with the Subscription's retries, and then the original event goes to
+the dead letter sink if one is set (see the [architecture](architecture.md)
+known gaps). The proper
 fix is Knative OIDC with an EventPolicy per broker, which also checks every
 sender and would let other teams use Knative in the same cluster. But it is
 alpha, switched on for the whole cluster, needs our ingress to send tokens, and

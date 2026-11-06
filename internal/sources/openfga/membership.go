@@ -28,8 +28,7 @@ type membership struct {
 // which is how iam-service and security-operator record that a user has a
 // role on an account. The cluster is the workspace that holds the Account
 // object.
-func parseMembership(c Change) (membership, bool) {
-	k := c.TupleKey
+func parseMembership(k TupleKey) (membership, bool) {
 	if k.Relation != "assignee" || !strings.HasPrefix(k.User, "user:") || k.User == "user:" || k.User == "user:*" {
 		return membership{}, false
 	}

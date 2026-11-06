@@ -90,7 +90,7 @@ spec:
         - name: controller
           image: ${IMAGE}
           imagePullPolicy: Never
-          args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig]
+          args: [subscription-controller, --kcp-kubeconfig=/kcp/kubeconfig, "--allowed-sink-hosts=${ALLOWED_SINK_HOSTS}"]
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
@@ -122,6 +122,10 @@ spec:
       labels: {app: openfga-adapter}
     spec:
       serviceAccountName: openfga-adapter
+      # Reads account paths through the core.platform-mesh.io virtual workspace.
+      hostAliases:
+        - ip: ${TRAEFIK_IP}
+          hostnames: [kcp.api.${BASE_DOMAIN}, root.kcp.${BASE_DOMAIN}]
       containers:
         - name: adapter
           image: ${IMAGE}
@@ -132,6 +136,7 @@ spec:
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           volumeMounts:
             - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
+            - {name: kcp, mountPath: /kcp, readOnly: true}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
@@ -142,6 +147,8 @@ spec:
           projected:
             sources:
               - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
+        - name: kcp
+          secret: {secretName: contrib-eventing-core}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -204,9 +211,12 @@ spec:
         - name: ingress
           port: 80
 ---
-# Knative's broker ingress accepts any event that reaches it. Only our ingress,
-# and Knative itself for reply events, may reach it. That ingress is shared by
-# every Broker in the cluster, so Knative must be used by eventing only.
+# Knative's broker ingress accepts any event that reaches it. Only our ingress
+# may reach it. That also blocks replies: if a sink answers with a CloudEvent,
+# Knative's broker filter sends it back to the broker ingress, past our ingress,
+# and it would reach every subscriber. The filter retries a blocked reply for a
+# while and drops it. The broker ingress is shared by every Broker in the
+# cluster, so Knative must be used by eventing only.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -223,9 +233,38 @@ spec:
             matchLabels: {kubernetes.io/metadata.name: contrib-eventing}
           podSelector:
             matchLabels: {app: ingress}
-        # TODO: this rule lets replies through, and a reply can be any event a
-        # sink makes up, so it reaches subscribers without passing our ingress.
-        # Dropping the rule blocks replies (tested, e2e passes); Knative OIDC
-        # with an EventPolicy would reject them properly. See docs/roadmap.md.
-        - namespaceSelector:
-            matchLabels: {kubernetes.io/metadata.name: knative-eventing}
+---
+# The broker's channel accepts events, too, and hands them to every Trigger.
+# Only Knative's broker ingress may reach it, so nothing gets past our ingress
+# that way.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contrib-eventing-channel
+  namespace: knative-eventing
+spec:
+  podSelector:
+    matchLabels:
+      messaging.knative.dev/role: dispatcher
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {eventing.knative.dev/brokerRole: ingress}
+---
+# The broker filter delivers what it gets to a Trigger's sink. Only the
+# channel's dispatcher may reach it.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: contrib-eventing-broker-filter
+  namespace: knative-eventing
+spec:
+  podSelector:
+    matchLabels:
+      eventing.knative.dev/brokerRole: filter
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {messaging.knative.dev/role: dispatcher}

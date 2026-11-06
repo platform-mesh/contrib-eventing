@@ -20,6 +20,8 @@ import (
 
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -40,6 +42,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	if cfg.Namespace == "" {
 		log.Fatal().Msg("POD_NAMESPACE or --namespace must be set")
 	}
+	ctrl.SetLogger(log.ComponentLogger("controller-runtime").Logr())
 	ctx, _, shutdown := pmcontext.StartContext(log, cfg, defaultCfg.ShutdownTimeout)
 	defer shutdown()
 
@@ -65,7 +68,17 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Msg("starting adapter")
+	if cfg.CoreKubeconfig != "" {
+		coreCfg, err := clientcmd.BuildConfigFromFlags("", cfg.CoreKubeconfig)
+		if err != nil {
+			log.Fatal().Err(err).Msg("unable to load core kubeconfig")
+		}
+		a.Paths = &openfga.AccountPaths{Config: coreCfg, EndpointSlice: cfg.CoreEndpointSlice, Grace: time.Minute, SyncTimeout: 5 * time.Minute, Log: log}
+		if err := a.Paths.Start(ctx); err != nil {
+			log.Fatal().Err(err).Msg("unable to watch account paths")
+		}
+	}
+	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}

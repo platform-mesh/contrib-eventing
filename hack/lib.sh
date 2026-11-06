@@ -17,6 +17,7 @@ INGRESS_ADDRESS=${INGRESS_ADDRESS:-127.0.0.1}
 ORG=${ORG:-eventing-demo}
 DEMO_USER=${DEMO_USER:-$ORG@example.com}
 KNATIVE_VERSION=${KNATIVE_VERSION:-v1.23.1}
+NATSS_VERSION=${NATSS_VERSION:-v1.23.3}
 IMAGE=${IMAGE:-ghcr.io/platform-mesh/contrib-eventing:dev}
 NS=contrib-eventing
 

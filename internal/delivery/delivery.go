@@ -9,9 +9,14 @@ package delivery
 
 import (
 	"context"
+	"errors"
 
 	"github.com/platform-mesh/contrib-eventing/api/v1alpha1"
 )
+
+// ErrInvalid wraps errors of a backend that rejects the Subscription's
+// delivery settings. Trying again doesn't help; the Subscription has to change.
+var ErrInvalid = errors.New("invalid delivery")
 
 // Backend delivers events to the sinks of the Subscriptions.
 type Backend interface {

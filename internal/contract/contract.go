@@ -10,6 +10,7 @@ package contract
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 const (
 	TypeMembershipGranted = "io.platform-mesh.iam.membership.granted.v1alpha1"
 	TypeMembershipRevoked = "io.platform-mesh.iam.membership.revoked.v1alpha1"
+	TypeAccountMembers    = "io.platform-mesh.iam.account.members.v1alpha1"
 
 	// OrgExtension carries the org name, so subscribers can filter without
 	// reading the payload.
@@ -36,8 +38,26 @@ type Membership struct {
 	Account string `json:"account"`
 	// AccountID is unique in the platform, unlike the name of a nested account.
 	AccountID string `json:"accountId"`
-	Role      string `json:"role"`
-	User      User   `json:"user"`
+	// AccountPath is the account's kcp workspace path. Empty if the workspace
+	// was gone before the event was built.
+	AccountPath string `json:"accountPath,omitempty"`
+	Role        string `json:"role"`
+	User        User   `json:"user"`
+}
+
+// Member is a user and every role they have on an account.
+type Member struct {
+	User  User     `json:"user"`
+	Roles []string `json:"roles"`
+}
+
+// AccountMembers is the full member list of an account.
+type AccountMembers struct {
+	Org         string   `json:"org"`
+	Account     string   `json:"account"`
+	AccountID   string   `json:"accountId"`
+	AccountPath string   `json:"accountPath,omitempty"`
+	Members     []Member `json:"members"`
 }
 
 // AccountID is the logical cluster of the workspace that holds the Account
@@ -54,14 +74,34 @@ func MembershipChanged(granted bool, m Membership, changeKey string, at time.Tim
 	if granted {
 		typ = TypeMembershipGranted
 	}
+	return newEvent(typ, m.Org, m.AccountID, id(m.Org, changeKey), at, m)
+}
+
+// MembersSnapshot builds a members event. at is when the list was read. The id
+// comes from changeKey, the last change that led to it, and from the list: a
+// retry gives the same id, unless the list changed in between, because then it
+// is another event.
+func MembersSnapshot(m AccountMembers, changeKey string, at time.Time) (cloudevents.Event, error) {
+	if m.Members == nil {
+		// An account without members has an empty list, not null.
+		m.Members = []Member{}
+	}
+	data, err := json.Marshal(m)
+	if err != nil {
+		return cloudevents.Event{}, err
+	}
+	return newEvent(TypeAccountMembers, m.Org, m.AccountID, id(m.Org, TypeAccountMembers, changeKey, string(data)), at, m)
+}
+
+func newEvent(typ, org, accountID, eventID string, at time.Time, data any) (cloudevents.Event, error) {
 	e := cloudevents.NewEvent()
-	e.SetID(id(m.Org, changeKey))
+	e.SetID(eventID)
 	e.SetType(typ)
-	e.SetSource("platform-mesh.io/orgs/" + m.Org + "/iam")
-	e.SetSubject("accounts/" + m.AccountID)
+	e.SetSource("platform-mesh.io/orgs/" + org + "/iam")
+	e.SetSubject("accounts/" + accountID)
 	e.SetTime(at)
-	e.SetExtension(OrgExtension, m.Org)
-	err := e.SetData(cloudevents.ApplicationJSON, m)
+	e.SetExtension(OrgExtension, org)
+	err := e.SetData(cloudevents.ApplicationJSON, data)
 	return e, err
 }
 

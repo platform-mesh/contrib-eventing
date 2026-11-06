@@ -12,10 +12,8 @@ import (
 )
 
 func TestParseMembership(t *testing.T) {
-	change := func(user, relation, object string) Change {
-		var c Change
-		c.TupleKey.User, c.TupleKey.Relation, c.TupleKey.Object = user, relation, object
-		return c
+	change := func(user, relation, object string) TupleKey {
+		return TupleKey{User: user, Relation: relation, Object: object}
 	}
 
 	got, ok := parseMembership(change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account/32epcrhea5sv5v5b/team-a/member"))
@@ -27,7 +25,7 @@ func TestParseMembership(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, "kcp-admin", got.user)
 
-	for _, c := range []Change{
+	for _, k := range []TupleKey{
 		// The second tuple iam-service writes: the role on the account.
 		change("role:core_platform-mesh_io_account/32epcrhea5sv5v5b/team-a/member#assignee", "member", "core_platform-mesh_io_account:32epcrhea5sv5v5b/team-a"),
 		change("user:*", "assignee", "role:authenticated"),
@@ -36,7 +34,7 @@ func TestParseMembership(t *testing.T) {
 		change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account/abc/team-a"),
 		change("user:alice@example.com", "assignee", "role:core_platform-mesh_io_account//team-a/member"),
 	} {
-		_, ok := parseMembership(c)
-		assert.False(t, ok, "%+v is not a membership", c.TupleKey)
+		_, ok := parseMembership(k)
+		assert.False(t, ok, "%+v is not a membership", k)
 	}
 }

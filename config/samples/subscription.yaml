@@ -8,6 +8,7 @@ spec:
     types:
       - io.platform-mesh.iam.membership.granted.v1alpha1
       - io.platform-mesh.iam.membership.revoked.v1alpha1
+      - io.platform-mesh.iam.account.members.v1alpha1
   sink:
     uri: http://event-display.eventing-demo-sink.svc.cluster.local
   delivery:

@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 package openfga
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,13 +23,16 @@ type Client struct {
 	HTTP    *http.Client
 }
 
+// TupleKey is an OpenFGA tuple.
+type TupleKey struct {
+	User     string `json:"user"`
+	Relation string `json:"relation"`
+	Object   string `json:"object"`
+}
+
 // Change is one entry of the OpenFGA changelog.
 type Change struct {
-	TupleKey struct {
-		User     string `json:"user"`
-		Relation string `json:"relation"`
-		Object   string `json:"object"`
-	} `json:"tuple_key"`
+	TupleKey  TupleKey  `json:"tuple_key"`
 	Operation string    `json:"operation"`
 	Timestamp time.Time `json:"timestamp"`
 }
@@ -84,11 +88,56 @@ func (c *Client) Changes(ctx context.Context, storeID, objectType, token string,
 	return resp.Changes, resp.ContinuationToken, err
 }
 
+// Read returns every tuple on the given object.
+func (c *Client) Read(ctx context.Context, storeID, object string) ([]TupleKey, error) {
+	var tuples []TupleKey
+	token := ""
+	for {
+		body := map[string]any{"tuple_key": map[string]string{"object": object}, "page_size": 100}
+		if token != "" {
+			body["continuation_token"] = token
+		}
+		var page struct {
+			Tuples []struct {
+				Key TupleKey `json:"key"`
+			} `json:"tuples"`
+			ContinuationToken string `json:"continuation_token"`
+		}
+		if err := c.post(ctx, "/stores/"+url.PathEscape(storeID)+"/read", body, &page); err != nil {
+			return nil, err
+		}
+		for _, t := range page.Tuples {
+			tuples = append(tuples, t.Key)
+		}
+		if page.ContinuationToken == "" || len(page.Tuples) == 0 {
+			return tuples, nil
+		}
+		token = page.ContinuationToken
+	}
+}
+
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
 	if err != nil {
 		return err
 	}
+	return c.do(req, out)
+}
+
+func (c *Client) post(ctx context.Context, path string, in, out any) error {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(b))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, out)
+}
+
+func (c *Client) do(req *http.Request, out any) error {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		return err
@@ -96,7 +145,7 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	defer resp.Body.Close() //nolint:errcheck
 	if resp.StatusCode != http.StatusOK {
 		msg, _ := io.ReadAll(io.LimitReader(resp.Body, 256))
-		return fmt.Errorf("GET %s: %s: %s", path, resp.Status, msg)
+		return fmt.Errorf("%s %s: %s: %s", req.Method, req.URL.Path, resp.Status, msg)
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

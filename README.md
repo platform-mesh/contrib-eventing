@@ -8,8 +8,9 @@ Today, when someone is added to an account, a user logs in, or a provider change
 
 ```mermaid
 flowchart LR
-  fga[OpenFGA] -- changelog --> adapter[OpenFGA adapter]
-  adapter -- event --> delivery[Delivery]
+  fga[(OpenFGA)] -- changelog --> adapter[OpenFGA adapter]
+  adapter -- event --> ingress[Ingress]
+  ingress -- checked sender --> delivery["Delivery<br/>(Knative, NATS JetStream)"]
   delivery -- event --> sink[Your endpoint]
   subs[Subscription in kcp] -. what goes where .-> delivery
 ```
@@ -25,10 +26,15 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 - It does not change any existing Platform Mesh component. Eventing observes the system from outside and can be installed or removed independently.
 - It does not connect to message brokers on the subscriber side. A subscriber that needs GCP Pub/Sub, Kafka or similar runs its own bridge behind an HTTP endpoint.
 
-## First milestone
+## What it covers today
 
-- Membership events (a user gets or loses a role on an account), read from OpenFGA.
-- Subscriptions for platform admins, covering all orgs.
+- Membership events (a user gets or loses a role on an account) and a snapshot
+  of an account's members after each change, read from OpenFGA. Events carry the
+  account's workspace path.
+- Subscriptions for platform admins, covering all orgs or some of them, with
+  retries, timeouts and dead letter sinks. Sinks must be on the platform
+  operator's allowlist.
+- Events are stored in NATS JetStream before delivery, so restarts lose nothing.
 
 What comes after is in the [roadmap](docs/roadmap.md).
 
@@ -36,7 +42,8 @@ What comes after is in the [roadmap](docs/roadmap.md).
 
 You need a local Platform Mesh on kind, installed as described in
 [helm-charts/installation](https://github.com/platform-mesh/helm-charts/tree/main/installation),
-and `kubectl`, `docker`, `curl` and `jq`. Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
+and `kubectl`, `docker`, `curl` and `jq`. The install adds Knative Eventing and a
+single NATS JetStream server; Knative in that cluster must be used by eventing only (see [architecture](docs/architecture.md#how-it-plugs-in)).
 
 ```sh
 ./hack/install.sh     # adds eventing, a subscribed sink and a demo org eventing-demo
@@ -45,8 +52,10 @@ kubectl -n eventing-demo-sink logs deploy/event-display
 ```
 
 The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
-takes the role away again, `./test/e2e.sh` checks the whole path and
-`./hack/uninstall.sh` removes everything.
+takes the role away again, `./test/e2e.sh` checks the whole path,
+`./test/install-check.sh --uninstall` checks that installing again changes
+nothing and uninstalling leaves nothing, and `./hack/uninstall.sh` removes
+everything.
 
 ## Background
 

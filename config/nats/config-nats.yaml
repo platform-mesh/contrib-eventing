@@ -1,0 +1,14 @@
+# Where the JetStream channel finds NATS. Its dispatcher mounts this ConfigMap
+# and doesn't start without it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-nats
+  namespace: knative-eventing
+data:
+  eventing-nats: |
+    url: nats://nats.nats-io.svc.cluster.local:4222
+    connOpts:
+      retryOnFailedConnect: true
+      maxReconnects: 60
+      reconnectWaitMilliseconds: 2000

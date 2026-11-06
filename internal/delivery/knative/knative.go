@@ -27,12 +27,11 @@ const (
 	// BrokerName is the name of the one Broker.
 	BrokerName = "default"
 
-	// asyncHandlerAnnotation makes the Broker's channel accept an event before
-	// it is delivered. Without it the channel waits for every Trigger, retries
-	// included, so one failing sink holds up the ingress and the adapter
-	// publishes the event again to everyone. Knative copies the annotation from
-	// the Broker to the channel when it creates the channel.
-	asyncHandlerAnnotation = "messaging.knative.dev/async-handler"
+	// The backoff of Knative's default Broker config. A Trigger with its own
+	// delivery replaces the Broker's delivery as a whole, and the JetStream
+	// dispatcher crashes on a retry without backoff, so we always set both.
+	defaultBackoffPolicy = "exponential"
+	defaultBackoffDelay  = "PT0.2S"
 )
 
 var (
@@ -62,6 +61,11 @@ func (b *Backend) Ensure(ctx context.Context, trigger string, sub *v1alpha1.Subs
 		t.SetAnnotations(map[string]string{"eventing.platform-mesh.io/subscription": sub.Name})
 		return unstructured.SetNestedMap(t.Object, triggerSpec(sub), "spec")
 	})
+	if apierrors.IsBadRequest(err) || apierrors.IsInvalid(err) {
+		// Knative's webhook rejected the Trigger, for example a timeout that
+		// isn't a duration.
+		return delivery.Status{}, fmt.Errorf("%w: %w", delivery.ErrInvalid, err)
+	}
 	if err != nil {
 		return delivery.Status{}, fmt.Errorf("trigger %s/%s: %w", b.Namespace, trigger, err)
 	}
@@ -82,7 +86,6 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 	br.SetGroupVersionKind(brokerGVK)
 	br.SetNamespace(b.Namespace)
 	br.SetName(BrokerName)
-	br.SetAnnotations(map[string]string{asyncHandlerAnnotation: "true"})
 	if err := b.Client.Create(ctx, br); err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("broker %s/%s: %w", b.Namespace, BrokerName, err)
 	}
@@ -91,11 +94,9 @@ func (b *Backend) ensureBroker(ctx context.Context) error {
 
 // triggerSpec translates a Subscription into a Trigger spec. Knative delivers
 // an event only if every filter matches: one for the types, one for the orgs.
-//
-// TODO: if the sink answers with a CloudEvent, Knative publishes it into the
-// Broker as a reply, past our ingress. Triggers cannot tell replies apart, so
-// this has to be blocked in front of the Broker (see the NetworkPolicy in
-// config/deploy/eventing.yaml).
+// Triggers cannot tell replies apart, so replies are blocked in front of the
+// Broker (see the NetworkPolicy in config/deploy/eventing.yaml). Without a
+// delivery the Trigger takes the Broker's, which is complete.
 func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 	filters := []any{anyOf("type", sub.Spec.Filter.Types)}
 	if len(sub.Spec.Filter.Orgs) > 0 {
@@ -107,7 +108,10 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		"subscriber": map[string]any{"uri": sub.Spec.Sink.URI},
 	}
 	if d := sub.Spec.Delivery; d != nil {
-		delivery := map[string]any{}
+		delivery := map[string]any{
+			"backoffPolicy": defaultBackoffPolicy,
+			"backoffDelay":  defaultBackoffDelay,
+		}
 		if d.Retry != nil {
 			delivery["retry"] = int64(*d.Retry)
 		}
@@ -116,6 +120,12 @@ func triggerSpec(sub *v1alpha1.Subscription) map[string]any {
 		}
 		if d.BackoffDelay != nil {
 			delivery["backoffDelay"] = *d.BackoffDelay
+		}
+		if d.Timeout != nil {
+			delivery["timeout"] = *d.Timeout
+		}
+		if d.DeadLetterSink != nil {
+			delivery["deadLetterSink"] = map[string]any{"uri": d.DeadLetterSink.URI}
 		}
 		spec["delivery"] = delivery
 	}

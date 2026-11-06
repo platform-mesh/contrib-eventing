@@ -1,0 +1,73 @@
+# A single NATS server with JetStream for the broker's channel. JetStream keeps
+# events on the volume, so they survive restarts of the channel dispatcher and
+# of NATS itself. Good enough locally; production wants a NATS cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nats-io
+---
+# eventing-natss connects to nats://nats.nats-io.svc.cluster.local by default.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: nats-io
+spec:
+  selector: {app: nats}
+  ports:
+    - {name: client, port: 4222}
+    - {name: monitor, port: 8222}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: nats-io
+spec:
+  replicas: 1
+  serviceName: nats
+  selector:
+    matchLabels: {app: nats}
+  template:
+    metadata:
+      labels: {app: nats}
+    spec:
+      containers:
+        - name: nats
+          image: nats:2.11.6-alpine
+          args: [--jetstream, --store_dir=/data, --http_port=8222]
+          ports:
+            - {name: client, containerPort: 4222}
+            - {name: monitor, containerPort: 8222}
+          readinessProbe:
+            httpGet: {path: /healthz, port: 8222}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: {storage: 1Gi}
+---
+# NATS has no auth here, so anyone who reaches it could read the stream, write
+# events into it past our ingress, or delete it. Only the JetStream channel's
+# controller and dispatcher may connect.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: nats
+  namespace: nats-io
+spec:
+  podSelector:
+    matchLabels: {app: nats}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: knative-eventing}
+          podSelector:
+            matchLabels: {messaging.knative.dev/channel: nats-jetstream-channel}
+      ports:
+        - {port: 4222}

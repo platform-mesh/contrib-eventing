@@ -20,6 +20,8 @@ type SubscriptionControllerConfig struct {
 	APIExportEndpointSlice string
 	// BrokerNamespace holds the Knative Broker and the Triggers.
 	BrokerNamespace string
+	// AllowedSinkHosts are the hosts sinks may point at. Empty allows none.
+	AllowedSinkHosts []string
 }
 
 func NewSubscriptionControllerConfig() SubscriptionControllerConfig {
@@ -34,6 +36,7 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.KCPKubeconfig, "kcp-kubeconfig", c.KCPKubeconfig, "kubeconfig for the provider workspace in kcp")
 	fs.StringVar(&c.APIExportEndpointSlice, "apiexport-endpointslice", c.APIExportEndpointSlice, "APIExportEndpointSlice to watch Subscriptions through")
 	fs.StringVar(&c.BrokerNamespace, "broker-namespace", c.BrokerNamespace, "namespace of the Knative Broker and Triggers (default from POD_NAMESPACE)")
+	fs.StringSliceVar(&c.AllowedSinkHosts, "allowed-sink-hosts", c.AllowedSinkHosts, "hosts sinks and dead letter sinks may point at, exact or *.suffix; empty allows none")
 }
 
 type OpenFGAAdapterConfig struct {
@@ -45,6 +48,10 @@ type OpenFGAAdapterConfig struct {
 	Interval   time.Duration
 	// Namespace holds the adapter's state ConfigMap.
 	Namespace string
+	// CoreKubeconfig reaches the workspace of the core.platform-mesh.io export,
+	// to read account paths. Empty means events have no accountPath.
+	CoreKubeconfig    string
+	CoreEndpointSlice string
 }
 
 func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
@@ -55,6 +62,9 @@ func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 		TokenFile:  "/var/run/secrets/contrib-eventing/token",
 		Interval:   5 * time.Second,
 		Namespace:  os.Getenv("POD_NAMESPACE"),
+
+		CoreKubeconfig:    "/kcp/kubeconfig",
+		CoreEndpointSlice: "core.platform-mesh.io",
 	}
 }
 
@@ -65,6 +75,8 @@ func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")
 	fs.DurationVar(&c.Interval, "interval", c.Interval, "how often to read the changelog")
 	fs.StringVar(&c.Namespace, "namespace", c.Namespace, "namespace of the state ConfigMap (default from POD_NAMESPACE)")
+	fs.StringVar(&c.CoreKubeconfig, "core-kubeconfig", c.CoreKubeconfig, "kubeconfig for the workspace of the core.platform-mesh.io export, to read account paths; empty leaves them out")
+	fs.StringVar(&c.CoreEndpointSlice, "core-endpointslice", c.CoreEndpointSlice, "APIExportEndpointSlice to read AccountInfo through")
 }
 
 type IngressConfig struct {

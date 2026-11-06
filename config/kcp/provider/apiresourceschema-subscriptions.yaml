@@ -1,7 +1,7 @@
 apiVersion: apis.kcp.io/v1alpha1
 kind: APIResourceSchema
 metadata:
-  name: v261027-8bf9c70.subscriptions.eventing.platform-mesh.io
+  name: v261104-fed92be.subscriptions.eventing.platform-mesh.io
 spec:
   group: eventing.platform-mesh.io
   names:
@@ -45,24 +45,42 @@ spec:
           description: SubscriptionSpec says which events go where.
           properties:
             delivery:
-              description: Delivery controls retries when the sink does not accept
-                an event.
+              description: |-
+                Delivery controls retries when the sink does not accept an event, and what
+                happens to events the sink never accepted.
               properties:
                 backoffDelay:
                   description: BackoffDelay is the base delay between retries as an
                     ISO 8601 duration, e.g. PT0.5S.
+                  pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
                   type: string
                 backoffPolicy:
                   enum:
                   - linear
                   - exponential
                   type: string
+                deadLetterSink:
+                  description: DeadLetterSink gets the events the sink did not accept
+                    after all retries.
+                  properties:
+                    uri:
+                      pattern: ^https?://
+                      type: string
+                  required:
+                  - uri
+                  type: object
                 retry:
                   description: Retry is the number of retries after the first failed
                     attempt.
                   format: int32
                   minimum: 0
                   type: integer
+                timeout:
+                  description: |-
+                    Timeout is how long a single request to the sink may take, as an ISO 8601
+                    duration, e.g. PT10S.
+                  pattern: ^P(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(\d+H)?(\d+M)?(\d+(\.\d+)?S)?)?$
+                  type: string
               type: object
             filter:
               description: |-

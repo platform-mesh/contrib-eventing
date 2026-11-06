@@ -1,0 +1,23 @@
+# New Brokers get a JetStream channel. A Broker keeps the channel it was created
+# with, and the stream keeps the settings it was created with.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: config-br-default-channel
+  namespace: knative-eventing
+data:
+  channel-template-spec: |
+    apiVersion: messaging.knative.dev/v1alpha1
+    kind: NatsJetStreamChannel
+    spec:
+      # Knative recreates a Trigger's channel subscription whenever its delivery
+      # changes. Without this, the new subscription would get every event the
+      # stream still holds.
+      consumerConfigTemplate:
+        deliverPolicy: New
+      # Retries are over within minutes, so a day of events is plenty. The size
+      # limit keeps the stream below the NATS volume.
+      stream:
+        config:
+          maxAge: 24h
+          maxBytes: 536870912
