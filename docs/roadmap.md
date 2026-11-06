@@ -15,7 +15,8 @@ Each milestone ends with something that runs on a local kind setup.
    first consumer (snapshots). Details and open questions:
    [milestone 2](milestone-2.md).
 3. **Keycloak events.** Login, user created and user deleted, from a Keycloak
-   adapter. A prototype for login exists.
+   adapter. A prototype for login exists. Details and open questions:
+   [milestone 3](milestone-3.md).
 4. **Installable module.** Published images and chart, install through
    `ManagedProvider`, automatic binding for new orgs, more than one shard,
    installations other than kind, a durable broker class instead of the
