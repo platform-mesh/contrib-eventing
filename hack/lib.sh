@@ -47,6 +47,37 @@ kcp() {
     --tls-server-name "$KCP_HOST" "$@"
 }
 
+# keycloak <method> <path below /keycloak> [curl args...]
+# Calls Keycloak through the ingress as the Keycloak admin. Install scripts
+# only: the components never get admin. Admin tokens of the master realm live 60
+# seconds, so we log in again when ours is older than 30. The credentials stay
+# in local variables of keycloak_login and are never printed.
+keycloak() {
+  local method=$1 path=$2
+  shift 2
+  if [[ -z ${KEYCLOAK_TOKEN:-} ]] || ((SECONDS - ${KEYCLOAK_TOKEN_AT:-0} > 30)); then
+    keycloak_login
+  fi
+  curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \
+    --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
+    -X "$method" -H "Authorization: Bearer $KEYCLOAK_TOKEN" \
+    -H 'Content-Type: application/json' \
+    "https://$BASE_DOMAIN:$PORT/keycloak$path" "$@"
+}
+
+# Logs in as the Keycloak admin from the keycloak-admin Secret.
+keycloak_login() {
+  local user pass
+  user=$(kind_kubectl -n platform-mesh-system get secret keycloak-admin -o jsonpath='{.data.username}' | base64 -d)
+  pass=$(kind_kubectl -n platform-mesh-system get secret keycloak-admin -o jsonpath='{.data.password}' | base64 -d)
+  KEYCLOAK_TOKEN=$(curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \
+    --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
+    "https://$BASE_DOMAIN:$PORT/keycloak/realms/master/protocol/openid-connect/token" \
+    -d grant_type=password -d client_id=admin-cli \
+    --data-urlencode "username=$user" --data-urlencode "password=$pass" | jq -r .access_token)
+  KEYCLOAK_TOKEN_AT=$SECONDS
+}
+
 # wait_for <description> <timeout seconds> <command...>
 wait_for() {
   local what=$1 timeout=$2

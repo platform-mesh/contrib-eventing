@@ -19,6 +19,30 @@ log "Removing Subscriptions"
 # The controller is still running and removes the Triggers on the way.
 kcp root:providers:eventing delete subscriptions --all --timeout=60s >/dev/null 2>&1 || true
 
+# Undo exactly what hack/steps/45-keycloak-reader.sh changed (a stopgap until
+# platform-mesh/platform-mesh#578). It has to run before the namespace goes,
+# because the ConfigMap with what was changed lives there.
+log "Reverting the Keycloak stopgap"
+stopgap=$(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o json 2>/dev/null || true)
+for realm in $(jq -r '.data // {} | keys[]' <<<"${stopgap:-null}"); do
+  mode=$(jq -r --arg r "$realm" '.data[$r]' <<<"$stopgap")
+  # The realm may be gone already.
+  cfg=$(keycloak GET "/admin/realms/$realm/events/config" 2>/dev/null) || continue
+  case $mode in
+  # The expiration stays, it does no harm.
+  enabled) new=$(jq -c '.eventsEnabled = false' <<<"$cfg") ;;
+  added-login) new=$(jq -c '.enabledEventTypes -= ["LOGIN"]' <<<"$cfg") ;;
+  *) continue ;;
+  esac
+  keycloak PUT "/admin/realms/$realm/events/config" -o /dev/null -d "$new"
+done
+# Deleting the client drops its role mappings.
+reader_uuid=$(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader" | jq -r '.[0].id // empty')
+[[ -z $reader_uuid ]] || keycloak DELETE "/admin/realms/master/clients/$reader_uuid" -o /dev/null
+# The client for hack/login.sh, if the demo org is still there.
+login_uuid=$(keycloak GET "/admin/realms/$ORG/clients?clientId=contrib-eventing-login-test" 2>/dev/null | jq -r '.[0].id // empty' || true)
+[[ -z $login_uuid ]] || keycloak DELETE "/admin/realms/$ORG/clients/$login_uuid" -o /dev/null
+
 log "Removing the components and the broker"
 kind_kubectl delete ns "$NS" eventing-demo-sink --ignore-not-found --wait=false >/dev/null
 kind_kubectl delete clusterrolebinding contrib-eventing-ingress-auth-delegator --ignore-not-found >/dev/null

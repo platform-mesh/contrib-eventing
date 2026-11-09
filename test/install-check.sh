@@ -34,11 +34,35 @@ state() {
   kcp root:providers:eventing get subscriptions -o json | jq -S '.items[] | {name: .metadata.name, generation: .metadata.generation, spec}'
   kind_kubectl -n nats-io exec nats-0 -- wget -qO- 'http://localhost:8222/jsz?consumers=true' |
     jq -c '.account_details[].stream_detail[] | {name, consumers: [.consumer_detail[].name] | sort}'
+  keycloak_state
+}
+
+# The Keycloak side of the stopgap (hack/steps/45-keycloak-reader.sh): the
+# reader client with its roles on each org realm, and each org realm's event
+# store settings.
+keycloak_state() {
+  local reader sa realm
+  reader=$(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader")
+  jq -S '[.[] | {clientId, publicClient, serviceAccountsEnabled, standardFlowEnabled, directAccessGrantsEnabled}]' <<<"$reader"
+  sa=$(jq -r '.[0].id // empty' <<<"$reader")
+  if [[ -n $sa ]]; then
+    keycloak GET "/admin/realms/master/clients/$sa/service-account-user" | jq -S '{username, enabled}'
+    sa=$(keycloak GET "/admin/realms/master/clients/$sa/service-account-user" | jq -r .id)
+    keycloak GET "/admin/realms/master/users/$sa/role-mappings" |
+      jq -S '{realm: [.realmMappings // [] | .[].name] | sort, clients: ((.clientMappings // {}) | map_values([.mappings[].name] | sort))}'
+  fi
+  for realm in $(keycloak GET /admin/realms | jq -r '.[].realm' | sort); do
+    [[ $realm == master || $realm == welcome ]] && continue
+    keycloak GET "/admin/realms/$realm" | jq -S '{realm, eventsEnabled, enabledEventTypes: (.enabledEventTypes // [] | sort), eventsExpiration}'
+  done
 }
 
 install() { "$ROOT/hack/install.sh" >"$SECRET_DIR/install-check.log" 2>&1 || die "install.sh failed, see $SECRET_DIR/install-check.log"; }
 
 if $uninstall; then
+  # uninstall.sh reads what the stopgap changed from this ConfigMap, which goes
+  # with the namespace.
+  stopgap=$(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o json | jq -c '.data // {}')
   log "Uninstall leaves nothing behind"
   "$ROOT/hack/uninstall.sh" --keep-org >/dev/null 2>&1 || fail "uninstall.sh failed"
   for ns in "${namespaces[@]}"; do
@@ -55,6 +79,22 @@ if $uninstall; then
   connections=$(kind_kubectl -n platform-mesh-system get platformmesh platform-mesh -o json |
     jq '[.spec.kcp.extraProviderConnections // [] | .[] | select(.secret | startswith("contrib-eventing"))] | length')
   [[ $connections == 0 ]] && pass "no provider connections" || fail "$connections provider connections left"
+
+  [[ -z $(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader" | jq -r '.[0].id // empty') ]] &&
+    pass "Keycloak reader client gone" || fail "Keycloak reader client still there"
+  for realm in $(jq -r 'keys[]' <<<"$stopgap"); do
+    rep=$(keycloak GET "/admin/realms/$realm" 2>/dev/null) || continue
+    case $(jq -r --arg r "$realm" '.[$r]' <<<"$stopgap") in
+    enabled)
+      [[ $(jq -r .eventsEnabled <<<"$rep") == false ]] && pass "realm $realm: event store off again" ||
+        fail "realm $realm: event store still on" ;;
+    added-login)
+      jq -e '.enabledEventTypes | index("LOGIN") | not' <<<"$rep" >/dev/null && pass "realm $realm: LOGIN removed again" ||
+        fail "realm $realm: LOGIN still stored" ;;
+    esac
+  done
+  [[ -z $(keycloak GET "/admin/realms/$ORG/clients?clientId=contrib-eventing-login-test" | jq -r '.[0].id // empty') ]] &&
+    pass "login test client gone" || fail "login test client still there"
 
   log "Install works after uninstall"
   install
