@@ -41,6 +41,8 @@ type fakeKeycloak struct {
 	events map[string][]kc.Event
 	// users by id, the same in every realm
 	users map[string]kc.User
+	// down makes everything but the token endpoint answer 503.
+	down bool
 	// dateFroms records the dateFrom of every events request per realm.
 	dateFroms map[string][]int64
 }
@@ -66,6 +68,10 @@ func (f *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"access_token":"tok","token_type":"Bearer","expires_in":300}`)
+		return
+	}
+	if f.down {
+		http.Error(w, "down", http.StatusServiceUnavailable)
 		return
 	}
 	if r.Header.Get("Authorization") != "Bearer tok" {
@@ -359,4 +365,26 @@ func TestDeletedRealmIsDropped(t *testing.T) {
 	require.NoError(t, a.poll(ctx))
 	assert.Contains(t, loadedState(t, a), "acme")
 	assert.NotContains(t, loadedState(t, a), "beta")
+}
+
+func TestKeycloakOutage(t *testing.T) {
+	h := newHarness(t)
+	h.fake.addRealm("acme", "id-acme")
+	a := h.adapter(t)
+	ctx := context.Background()
+	require.NoError(t, a.poll(ctx))
+	h.fake.login("acme", "e1", 2000, "u-alice")
+
+	h.fake.mu.Lock()
+	h.fake.down = true
+	h.fake.mu.Unlock()
+	require.Error(t, a.poll(ctx), "an unreachable Keycloak fails the poll")
+	assert.Empty(t, h.published)
+	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "state is untouched")
+
+	h.fake.mu.Lock()
+	h.fake.down = false
+	h.fake.mu.Unlock()
+	require.NoError(t, a.poll(ctx))
+	require.Len(t, h.published, 1, "the login is published once Keycloak is back")
 }
