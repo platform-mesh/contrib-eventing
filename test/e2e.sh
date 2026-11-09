@@ -28,6 +28,10 @@ last_snapshot() {
 # roles <account id> <user>: the user's roles in the last snapshot, as JSON.
 roles() { last_snapshot "$1" | jq -c --arg u "$2" '[.members[] | select(.user.id == $u) | .roles[]]'; }
 add_member() { "$ROOT/hack/add-member.sh" "$@" >/dev/null; }
+# Login events. event-display prints the type first, so the context and the data follow.
+logins() { sink_logs | grep -c "type: io.platform-mesh.iam.user.loggedin" || true; }
+more_logins_than() { (($(logins) > $1)); }
+last_login() { sink_logs | grep -A23 "type: io.platform-mesh.iam.user.loggedin" | tail -24; }
 subscription_ready() { [[ $(admin get subscription $sub -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}') == True ]]; }
 
 log "The platform admin's Subscription is ready"
@@ -57,6 +61,9 @@ grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured 
   fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
 path=$(last_snapshot "$account_id" | jq -r .accountPath)
 [[ $path == "root:orgs:$ORG" ]] && pass "snapshot accountPath" || fail "snapshot accountPath: $path"
+# hack/steps/70-demo-org.sh gave the demo user a name in Keycloak.
+names=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"')
+[[ $names == "Eventing Demo" ]] && pass "snapshot has the member's names" || fail "snapshot names: $names"
 
 log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
@@ -77,6 +84,43 @@ grep -q "\"id\": \"$DEMO_USER\"" <<<"$(last_event revoked)" && pass "membership.
 wait_for "a members snapshot at the sink" 30 more_snapshots_than "$before_snapshots"
 [[ $(roles "$account_id" "$DEMO_USER") == '["owner"]' ]] && pass "snapshot without the removed role" ||
   fail "snapshot: $(roles "$account_id" "$DEMO_USER")"
+
+log "A login is announced"
+before=$(logins)
+"$ROOT/hack/login.sh" >/dev/null
+wait_for "user.loggedin at the sink" 60 more_logins_than "$before"
+event=$(last_login)
+grep -q "source: platform-mesh.io/orgs/$ORG/iam" <<<"$event" && pass "source" || fail "login source missing"
+grep -q "subject: users/$DEMO_USER" <<<"$event" && pass "subject users/$DEMO_USER" || fail "login subject missing"
+grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "login pmorg missing"
+grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "login user missing"
+grep -q "\"org\": \"$ORG\"" <<<"$event" && pass "org in the data" || fail "login org missing"
+grep -qi 'ipaddress\|sessionid' <<<"$event" && fail "login has an IP address or session id" || pass "no IP address or session id"
+total=$(logins)
+kind_kubectl -n "$NS" rollout restart deploy/keycloak-adapter >/dev/null
+kind_kubectl -n "$NS" rollout status deploy/keycloak-adapter --timeout=120s >/dev/null
+sleep 15
+[[ $(logins) == "$total" ]] && pass "no duplicates after a restart" || fail "logins published again"
+
+log "The reader token has no admin"
+reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client-secret}' | base64 -d)
+reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \
+  --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
+  "https://$BASE_DOMAIN:$PORT/keycloak/realms/master/protocol/openid-connect/token" \
+  -d grant_type=client_credentials -d client_id=contrib-eventing-keycloak-reader \
+  --data-urlencode client_secret@- | jq -r .access_token)
+claims=$(cut -d. -f2 <<<"$reader_token" | tr '_-' '/+' | base64 -d 2>/dev/null || true)
+jq -e '(.realm_access.roles // []) | index("admin") == null and index("create-realm") == null' <<<"$claims" >/dev/null &&
+  pass "no admin or create-realm role" || fail "reader token has realm roles: $(jq -c .realm_access <<<"$claims")"
+# The account client's roles come with every service account's default roles.
+jq -e '[(.resource_access // {}) | del(.account) | to_entries[] | select((.key | endswith("-realm") | not) or
+    ((.value.roles // []) - ["view-events", "view-users"] | length > 0))] | length == 0' <<<"$claims" >/dev/null &&
+  pass "only view-events and view-users on the realms' management clients" ||
+  fail "reader token roles: $(jq -c .resource_access <<<"$claims")"
+code=$(curl -s -o /dev/null -w '%{http_code}' --cacert "$SECRET_DIR/domain-ca.crt" --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
+  -X PUT "https://$BASE_DOMAIN:$PORT/keycloak/admin/realms/$ORG/events/config" -H "Authorization: Bearer $reader_token" \
+  -H 'Content-Type: application/json' -d '{}')
+[[ $code == 403 ]] && pass "changing the event store: 403" || fail "changing the event store: $code"
 
 log "Restarting the adapter does not publish again"
 total=$(($(count granted) + $(count revoked) + $(snapshots)))
