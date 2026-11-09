@@ -107,6 +107,15 @@ sequenceDiagram
 4. A Subscription asked for membership events (of all orgs, or of `acme`). Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
 
+### A login
+
+The Keycloak adapter works the same way, with Keycloak's event store instead of a changelog. Example: Alice logs in to the portal of org `acme`.
+
+1. Keycloak stores a `LOGIN` event in the realm `acme`. The install switches the store on for logins only, and the events are kept for seven days.
+2. The Keycloak adapter polls the stored events of every org realm (not `master` or `welcome`). Each realm has a cursor, the time of the last event it published, kept in a ConfigMap. Keycloak includes events at exactly that time, so the cursor also keeps the ids of the events at that time it has already sent.
+3. For each new event it looks up the user to get the id the platform's user claim has (the email by default, the Keycloak id with `sub`), builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. The cursor only moves after every event of a page was accepted.
+4. From the ingress on, the event travels like any other.
+
 ## Tenancy
 
 Subscriptions are for platform admins. They live in the provider workspace `root:providers:eventing`, which binds its own export. The export has no `APIExportPolicy`, so orgs cannot bind it.

@@ -22,7 +22,7 @@ This ADR fixes the scope and shape of the first milestone so implementation can 
 4. **Delivery through Knative, hidden behind our API.** Fan-out, filtering, retries and dead letters come from Knative Broker and Trigger. Consumers never create Knative objects, so the backend can be replaced later.
 5. **Own ingress.** All events enter through an ingress that authenticates the sender before they reach the broker. It is reachable through the platform's Gateway API. Subscription targets are limited by an allowlist that the platform operator controls.
 6. **One engine-neutral contract.** Events are CloudEvents with the types and fields in the [contract](../contract.md). Users are identified by the user claim the platform admin configured (`email` by default). No OpenFGA identifiers appear in events.
-7. **First milestone scope.** Membership events from OpenFGA. Keycloak events (login, user created) come later. A publish path for providers comes with the installable module in milestone 4.
+7. **First milestone scope.** Membership events from OpenFGA. Keycloak events come later. Milestone 3 adds logins and names; user created and deleted come from the `User` resource of ADR 018. A publish path for providers comes with the installable module in milestone 4.
 
 ## Considered Options
 

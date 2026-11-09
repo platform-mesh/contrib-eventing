@@ -15,7 +15,9 @@ Each milestone ends with something that runs on a local kind setup.
    The plan and its reasons: [milestone 2](milestone-2.md).
 3. **Logins and names.** Login events from the Keycloak event store, and first
    and last names in member snapshots. security-operator provides the event
-   store and read-only Keycloak access. Details: [milestone 3](milestone-3.md).
+   store and read-only Keycloak access
+   ([platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578));
+   until then the install script does. Details: [milestone 3](milestone-3.md).
 4. **Installable module.** Published images and chart, install through
    `ManagedProvider`, automatic binding for new orgs, more than one shard,
    installations other than kind. Providers get a way to publish their own
