@@ -112,9 +112,9 @@ reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "
 claims=$(cut -d. -f2 <<<"$reader_token" | tr '_-' '/+' | base64 -d 2>/dev/null || true)
 jq -e '(.realm_access.roles // []) | index("admin") == null and index("create-realm") == null' <<<"$claims" >/dev/null &&
   pass "no admin or create-realm role" || fail "reader token has realm roles: $(jq -c .realm_access <<<"$claims")"
-# The account client's roles come with every service account's default roles.
+# The account client's roles come with every service account's default roles; view-users brings query-users and query-groups with it.
 jq -e '[(.resource_access // {}) | del(.account) | to_entries[] | select((.key | endswith("-realm") | not) or
-    ((.value.roles // []) - ["view-events", "view-users"] | length > 0))] | length == 0' <<<"$claims" >/dev/null &&
+    ((.value.roles // []) - ["view-events", "view-users", "query-groups", "query-users"] | length > 0))] | length == 0' <<<"$claims" >/dev/null &&
   pass "only view-events and view-users on the realms' management clients" ||
   fail "reader token roles: $(jq -c .resource_access <<<"$claims")"
 code=$(curl -s -o /dev/null -w '%{http_code}' --cacert "$SECRET_DIR/domain-ca.crt" --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
