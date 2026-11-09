@@ -14,6 +14,12 @@ metadata:
 apiVersion: v1
 kind: ServiceAccount
 metadata:
+  name: keycloak-adapter
+  namespace: contrib-eventing
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
   name: ingress
   namespace: contrib-eventing
 ---
@@ -56,6 +62,26 @@ metadata:
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: openfga-adapter}
 subjects:
   - {kind: ServiceAccount, name: openfga-adapter, namespace: contrib-eventing}
+---
+# The Keycloak adapter keeps its place in the event store in a ConfigMap.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: keycloak-adapter
+  namespace: contrib-eventing
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, create, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: keycloak-adapter
+  namespace: contrib-eventing
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: keycloak-adapter}
+subjects:
+  - {kind: ServiceAccount, name: keycloak-adapter, namespace: contrib-eventing}
 ---
 # The ingress checks publishers' tokens with TokenReviews.
 apiVersion: rbac.authorization.k8s.io/v1
@@ -130,13 +156,14 @@ spec:
         - name: adapter
           image: ${IMAGE}
           imagePullPolicy: Never
-          args: [openfga-adapter]
+          args: [openfga-adapter, --user-claim=${USER_CLAIM}]
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
           volumeMounts:
             - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
             - {name: kcp, mountPath: /kcp, readOnly: true}
+            - {name: keycloak, mountPath: /var/run/secrets/keycloak, readOnly: true}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities: {drop: [ALL]}
@@ -149,6 +176,49 @@ spec:
               - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
         - name: kcp
           secret: {secretName: contrib-eventing-core}
+        # Without it member snapshots have no names.
+        - name: keycloak
+          secret: {secretName: contrib-eventing-keycloak-reader, optional: true}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-adapter
+  namespace: contrib-eventing
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: keycloak-adapter}
+  template:
+    metadata:
+      labels: {app: keycloak-adapter}
+    spec:
+      serviceAccountName: keycloak-adapter
+      containers:
+        - name: adapter
+          image: ${IMAGE}
+          imagePullPolicy: Never
+          args: [keycloak-adapter, --user-claim=${USER_CLAIM}]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+          volumeMounts:
+            - {name: token, mountPath: /var/run/secrets/contrib-eventing, readOnly: true}
+            - {name: keycloak, mountPath: /var/run/secrets/keycloak, readOnly: true}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+            runAsNonRoot: true
+      volumes:
+        # A token only the ingress accepts.
+        - name: token
+          projected:
+            sources:
+              - serviceAccountToken: {path: token, audience: contrib-eventing, expirationSeconds: 3600}
+        # The reader client of hack/steps/45-keycloak-reader.sh: view-events
+        # and view-users only.
+        - name: keycloak
+          secret: {secretName: contrib-eventing-keycloak-reader}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -170,7 +240,7 @@ spec:
           imagePullPolicy: Never
           args:
             - ingress
-            - --publishers=system:serviceaccount:contrib-eventing:openfga-adapter
+            - --publishers=system:serviceaccount:contrib-eventing:openfga-adapter,system:serviceaccount:contrib-eventing:keycloak-adapter
           env:
             - name: POD_NAMESPACE
               valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
