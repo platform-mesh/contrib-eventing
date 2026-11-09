@@ -39,7 +39,71 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringSliceVar(&c.AllowedSinkHosts, "allowed-sink-hosts", c.AllowedSinkHosts, "hosts sinks and dead letter sinks may point at, exact or *.suffix; empty allows none")
 }
 
+// KeycloakConfig is how components reach Keycloak, with a client of the master
+// realm that only has view-events and view-users.
+type KeycloakConfig struct {
+	URL      string
+	ClientID string
+	// ClientSecretFile holds the client's secret.
+	ClientSecretFile string
+	// UserClaim is the claim Platform Mesh uses as user id: email or sub.
+	UserClaim string
+	// NameTTL is how long a user's names are remembered.
+	NameTTL time.Duration
+}
+
+func NewKeycloakConfig() KeycloakConfig {
+	return KeycloakConfig{
+		URL:              "http://keycloak-service.platform-mesh-system.svc.cluster.local:8080/keycloak",
+		ClientID:         "contrib-eventing-keycloak-reader",
+		ClientSecretFile: "/var/run/secrets/keycloak/client-secret",
+		UserClaim:        "email",
+		NameTTL:          5 * time.Minute,
+	}
+}
+
+func (c *KeycloakConfig) AddFlags(fs *pflag.FlagSet) {
+	fs.StringVar(&c.URL, "keycloak-url", c.URL, "Keycloak URL including its relative path")
+	fs.StringVar(&c.ClientID, "keycloak-client-id", c.ClientID, "client of the master realm with view-events and view-users")
+	fs.StringVar(&c.ClientSecretFile, "keycloak-client-secret-file", c.ClientSecretFile, "file with the client's secret")
+	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim Platform Mesh uses as user id, email or sub")
+	fs.DurationVar(&c.NameTTL, "name-ttl", c.NameTTL, "how long user names are remembered")
+}
+
+type KeycloakAdapterConfig struct {
+	KeycloakConfig
+	// SkipRealms are realms that do not belong to an org.
+	SkipRealms []string
+	IngressURL string
+	TokenFile  string
+	Interval   time.Duration
+	// Namespace holds the adapter's state ConfigMap.
+	Namespace string
+}
+
+func NewKeycloakAdapterConfig() KeycloakAdapterConfig {
+	return KeycloakAdapterConfig{
+		KeycloakConfig: NewKeycloakConfig(),
+		SkipRealms:     []string{"master", "welcome"},
+		IngressURL:     "http://ingress.contrib-eventing.svc.cluster.local",
+		TokenFile:      "/var/run/secrets/contrib-eventing/token",
+		Interval:       5 * time.Second,
+		Namespace:      os.Getenv("POD_NAMESPACE"),
+	}
+}
+
+func (c *KeycloakAdapterConfig) AddFlags(fs *pflag.FlagSet) {
+	c.KeycloakConfig.AddFlags(fs)
+	fs.StringSliceVar(&c.SkipRealms, "skip-realms", c.SkipRealms, "Keycloak realms that do not belong to an org")
+	fs.StringVar(&c.IngressURL, "ingress-url", c.IngressURL, "where to send events")
+	fs.StringVar(&c.TokenFile, "token-file", c.TokenFile, "ServiceAccount token the ingress accepts")
+	fs.DurationVar(&c.Interval, "interval", c.Interval, "how often to read the events")
+	fs.StringVar(&c.Namespace, "namespace", c.Namespace, "namespace of the state ConfigMap (default from POD_NAMESPACE)")
+}
+
 type OpenFGAAdapterConfig struct {
+	// KeycloakConfig is optional: without the secret file snapshots have no names.
+	KeycloakConfig
 	OpenFGAURL string
 	// SkipStores are OpenFGA stores that do not belong to an org.
 	SkipStores []string
@@ -56,12 +120,13 @@ type OpenFGAAdapterConfig struct {
 
 func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 	return OpenFGAAdapterConfig{
-		OpenFGAURL: "http://openfga.platform-mesh-system.svc.cluster.local:8080",
-		SkipStores: []string{"orgs"},
-		IngressURL: "http://ingress.contrib-eventing.svc.cluster.local",
-		TokenFile:  "/var/run/secrets/contrib-eventing/token",
-		Interval:   5 * time.Second,
-		Namespace:  os.Getenv("POD_NAMESPACE"),
+		KeycloakConfig: NewKeycloakConfig(),
+		OpenFGAURL:     "http://openfga.platform-mesh-system.svc.cluster.local:8080",
+		SkipStores:     []string{"orgs"},
+		IngressURL:     "http://ingress.contrib-eventing.svc.cluster.local",
+		TokenFile:      "/var/run/secrets/contrib-eventing/token",
+		Interval:       5 * time.Second,
+		Namespace:      os.Getenv("POD_NAMESPACE"),
 
 		CoreKubeconfig:    "/kcp/kubeconfig",
 		CoreEndpointSlice: "core.platform-mesh.io",
@@ -69,6 +134,7 @@ func NewOpenFGAAdapterConfig() OpenFGAAdapterConfig {
 }
 
 func (c *OpenFGAAdapterConfig) AddFlags(fs *pflag.FlagSet) {
+	c.KeycloakConfig.AddFlags(fs)
 	fs.StringVar(&c.OpenFGAURL, "openfga-url", c.OpenFGAURL, "OpenFGA HTTP API")
 	fs.StringSliceVar(&c.SkipStores, "skip-stores", c.SkipStores, "OpenFGA stores that do not belong to an org")
 	fs.StringVar(&c.IngressURL, "ingress-url", c.IngressURL, "where to send events")
