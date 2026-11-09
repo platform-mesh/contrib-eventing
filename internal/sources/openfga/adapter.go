@@ -37,6 +37,9 @@ type Adapter struct {
 	FGA *Client
 	// Paths knows account paths. Without it events have no accountPath.
 	Paths *AccountPaths
+	// Names adds first and last names to the members of a snapshot. Without it
+	// snapshots have no names.
+	Names NameLookup
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -204,6 +207,7 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	if err != nil {
 		return err
 	}
+	a.addNames(ctx, org, members)
 	e, err := contract.MembersSnapshot(contract.AccountMembers{
 		Org:         org,
 		Account:     m.account,
@@ -215,6 +219,23 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 		return err
 	}
 	return a.publish(ctx, org, e)
+}
+
+// addNames fills in the names Keycloak knows. A Keycloak that cannot be reached
+// must not hold membership events back, so on an error the snapshot goes out
+// without names.
+func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) {
+	if a.Names == nil {
+		return
+	}
+	for i := range members {
+		first, last, err := a.Names.Names(ctx, org, members[i].User.ID)
+		if err != nil {
+			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read names, publishing without")
+			return
+		}
+		members[i].User.FirstName, members[i].User.LastName = first, last
+	}
 }
 
 func (a *Adapter) accountPath(m membership, at time.Time) (string, error) {
