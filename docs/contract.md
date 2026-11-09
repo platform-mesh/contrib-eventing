@@ -2,7 +2,7 @@
 
 This is what subscribers can rely on. It is a draft (`v1alpha1`) and may still change.
 
-Every event is a [CloudEvent 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) delivered over HTTP. The contract does not depend on which system produced the change: today membership events come from OpenFGA, but another adapter could produce the same events from a different authorization engine.
+Every event is a [CloudEvent 1.0](https://github.com/cloudevents/spec/blob/v1.0.2/cloudevents/spec.md) delivered over HTTP. The contract does not depend on which system produced the change: today membership events come from OpenFGA and login events from Keycloak, but another adapter could produce the same events from a different authorization engine or identity provider.
 
 ## Membership events
 
@@ -86,7 +86,7 @@ keeps member lists can replace its copy instead of applying changes.
     "accountId": "a5zld11wopsu1uea/team-a",
     "accountPath": "root:orgs:acme:team-a",
     "members": [
-      { "user": { "id": "alice@example.com" }, "roles": ["owner"] },
+      { "user": { "id": "alice@example.com", "firstName": "Alice", "lastName": "Liddell" }, "roles": ["owner"] },
       { "user": { "id": "bob@example.com" }, "roles": ["member"] }
     ]
   }
@@ -106,10 +106,58 @@ to a single snapshot.
   and owners are not listed as members unless they also have the member role.
 - **An empty list** means the account has no members, for example after it was
   deleted.
-- **No names.** The list has user ids only.
+- **Names.** `user.firstName` and `user.lastName` are set when Keycloak knows
+  them. They are missing for users who have none, for example invited users who
+  haven't set them yet, and for all users where eventing has no Keycloak access.
+  They can be up to five minutes old. Membership events never carry names.
 - **Only on change.** A snapshot is sent when the account's members change. A
   new Subscription, or one that missed a snapshot, gets an account's list with
   that account's next change.
+
+## Login events
+
+Sent after a user logged in to an org's Keycloak realm.
+
+| Type | Meaning |
+| --- | --- |
+| `io.platform-mesh.iam.user.loggedin.v1alpha1` | The user logged in |
+
+```json
+{
+  "specversion": "1.0",
+  "id": "0b8f6c1d2e3a4f5b8c9d0e1f2a3b4c5d",
+  "source": "platform-mesh.io/orgs/acme/iam",
+  "type": "io.platform-mesh.iam.user.loggedin.v1alpha1",
+  "subject": "users/alice@example.com",
+  "time": "2026-10-01T09:12:40.123Z",
+  "pmorg": "acme",
+  "datacontenttype": "application/json",
+  "data": {
+    "org": "acme",
+    "user": { "id": "alice@example.com" }
+  }
+}
+```
+
+Attributes are as for membership events, with these differences:
+
+| Attribute | Value |
+| --- | --- |
+| `id` | unique per login and the same on every redelivery |
+| `subject` | `users/<user.id>` |
+| `time` | when the user logged in |
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `org` | yes | org name |
+| `user.id` | yes | the user as Platform Mesh identifies them, by the same rule as in membership events: the value of the user claim, the email by default and the Keycloak user id with `sub` |
+
+- **No IP address, session or client.** Keycloak records them, the event leaves them out.
+- **Org realms only.** Logins to the `welcome` and `master` realms are not published, because they have no org.
+- **Only with the bundled Keycloak.** The events come from Keycloak's event store. With another identity provider there are no login events. User created and deleted events will come from the `User` resource instead, so they work with any provider.
+- **Duplicates** share the `id`; drop them.
+- **Logins can be lost.** Keycloak keeps stored events for seven days by default. If the adapter is down for longer, the logins in between are never published.
+- **Nothing from before eventing was installed.** Logins in an org that existed at install time count from the install; an org created later counts from its first login.
 
 ## What subscribers should expect
 
