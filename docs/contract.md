@@ -154,7 +154,7 @@ Attributes are as for membership events, with these differences:
 
 - **No IP address, session or client.** Keycloak records them, the event leaves them out.
 - **Org realms only.** Logins to the `welcome` and `master` realms are not published, because they have no org.
-- **Only with the bundled Keycloak.** The events come from Keycloak's event store. With another identity provider there are no login events. User created and deleted events will come from the `User` resource instead, so they work with any provider.
+- **Only with the bundled Keycloak, for now.** The type has no Keycloak details, so an adapter for another identity provider could send the same events, but today they only come from Keycloak's event store. User created and deleted events will come from the `User` resource instead, so they work with any provider.
 - **Duplicates** share the `id`; drop them.
 - **Logins can be lost.** Keycloak keeps stored events for seven days by default. If the adapter is down for longer, the logins in between are never published.
 - **Nothing from before eventing was installed.** Logins in an org that existed at install time count from the install; an org created later counts from its first login.
