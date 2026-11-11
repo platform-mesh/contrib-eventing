@@ -312,6 +312,16 @@ components:
           description: Everyone with a role on the account, sorted by user id. Empty if the account was deleted.
           items:
             $ref: '#/components/schemas/Member'
+        errors:
+          type: array
+          description: |
+            Only there if something went wrong while the snapshot was built. The members list
+            is complete anyway.
+            `namesUnavailable`: the names could not be read from Keycloak, so no member has
+            one. Keep the names you already have.
+          items:
+            type: string
+            enum: [namesUnavailable]
     UserLoggedIn:
       type: object
       required: [org, user]

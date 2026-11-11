@@ -88,6 +88,19 @@ func TestLoggedIn(t *testing.T) {
 	assert.NotEqual(t, e.ID(), otherOrg.ID())
 }
 
+func TestSnapshotErrors(t *testing.T) {
+	m := AccountMembers{Org: "acme", Account: "a", AccountID: AccountID("c", "a")}
+	ok, err := MembersSnapshot(m, "k", time.Unix(0, 0))
+	require.NoError(t, err)
+	assert.NotContains(t, string(ok.Data()), "errors")
+
+	m.Errors = []string{ErrorNamesUnavailable}
+	bad, err := MembersSnapshot(m, "k", time.Unix(0, 0))
+	require.NoError(t, err)
+	assert.Contains(t, string(bad.Data()), `"errors":["namesUnavailable"]`)
+	assert.NotEqual(t, ok.ID(), bad.ID(), "a snapshot with errors is another event")
+}
+
 func TestUserNames(t *testing.T) {
 	b, err := json.Marshal(Member{User: User{ID: "a", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
 	require.NoError(t, err)

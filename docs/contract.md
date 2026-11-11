@@ -111,8 +111,15 @@ to a single snapshot.
   haven't set them yet, and for all users where eventing has no Keycloak access.
   They can be up to five minutes old. Names come for all members of a
   snapshot or for none: if Keycloak can't be read in time, the snapshot has no
-  names at all. A missing name therefore does not mean it was removed; keep the
-  names you already have. Membership events never carry names.
+  names at all and says so in `errors` (below). A missing name therefore does
+  not mean it was removed; keep the names you already have. Membership events
+  never carry names.
+- **Errors.** `errors` is only there when something went wrong while the
+  snapshot was built. It lists codes. `namesUnavailable`: the names could not be
+  read from Keycloak, so no member has one, though they may have one in Keycloak.
+  It is not set when eventing has no Keycloak access, since then no snapshot has
+  names. The members list is complete either way. A later snapshot without
+  `errors` has the names again.
 - **Only on change.** A snapshot is sent when the account's members change. A
   new Subscription, or one that missed a snapshot, gets an account's list with
   that account's next change.

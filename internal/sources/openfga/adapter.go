@@ -210,13 +210,17 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	if err != nil {
 		return err
 	}
-	a.addNames(ctx, org, members)
+	var problems []string
+	if !a.addNames(ctx, org, members) {
+		problems = append(problems, contract.ErrorNamesUnavailable)
+	}
 	e, err := contract.MembersSnapshot(contract.AccountMembers{
 		Org:         org,
 		Account:     m.account,
 		AccountID:   contract.AccountID(m.cluster, m.account),
 		AccountPath: path,
 		Members:     members,
+		Errors:      problems,
 	}, changeKey(last), time.Now())
 	if err != nil {
 		return err
@@ -231,10 +235,12 @@ const DefaultNameTimeout = 15 * time.Second
 // names for some members only would make a consumer that replaces its copy
 // lose names it had. A Keycloak that cannot be reached must not hold
 // membership events back either, so within one deadline, and on any error the
-// snapshot goes out without names.
-func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) {
+// snapshot goes out without names. It returns false if names could not be read,
+// which the snapshot reports in its errors. Without a lookup there is nothing
+// to report.
+func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) bool {
 	if a.Names == nil {
-		return
+		return true
 	}
 	timeout := a.NameTimeout
 	if timeout == 0 {
@@ -247,13 +253,14 @@ func (a *Adapter) addNames(ctx context.Context, org string, members []contract.M
 		first, last, err := a.Names.Names(ctx, org, members[i].User.ID)
 		if err != nil {
 			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read names, publishing without")
-			return
+			return false
 		}
 		names[i] = [2]string{first, last}
 	}
 	for i := range members {
 		members[i].User.FirstName, members[i].User.LastName = names[i][0], names[i][1]
 	}
+	return true
 }
 
 func (a *Adapter) accountPath(m membership, at time.Time) (string, error) {

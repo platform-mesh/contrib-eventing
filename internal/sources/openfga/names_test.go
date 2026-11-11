@@ -124,6 +124,7 @@ func TestSnapshotNames(t *testing.T) {
 	}
 
 	m := snapshot(t)
+	assert.Empty(t, m.Errors, "nothing went wrong")
 	require.Len(t, m.Members, 2)
 	assert.Equal(t, contract.User{ID: "alice@example.com", FirstName: "Alice", LastName: "Liddell"}, m.Members[0].User)
 	assert.Equal(t, contract.User{ID: "bob@example.com"}, m.Members[1].User, "an invite has no names")
@@ -141,13 +142,15 @@ func TestSnapshotNames(t *testing.T) {
 	m = snapshot(t)
 	require.Len(t, m.Members, 2)
 	assert.Equal(t, contract.User{ID: "alice@example.com"}, m.Members[0].User)
+	assert.Equal(t, []string{contract.ErrorNamesUnavailable}, m.Errors, "the snapshot says why it has no names")
 
-	// No lookup configured: the JSON has no name fields.
+	// No lookup configured: the JSON has no name fields and no errors.
 	a.Names = nil
 	snapshot(t)
 	for _, e := range published {
 		assert.NotContains(t, string(e.Data()), "firstName")
 		assert.NotContains(t, string(e.Data()), "lastName")
+		assert.NotContains(t, string(e.Data()), "errors")
 	}
 }
 
@@ -173,14 +176,14 @@ func TestNamesAllOrNothing(t *testing.T) {
 
 	// Alice is read, bob fails: nobody gets a name.
 	m := members()
-	a.addNames(context.Background(), "acme", m)
+	assert.False(t, a.addNames(context.Background(), "acme", m))
 	assert.Equal(t, members(), m)
 
 	// Keycloak hangs: the one deadline ends the name step and the snapshot goes out.
 	a = &Adapter{Log: testlogger.New().HideLogOutput().Logger, Names: flakyNames{hang: true}, NameTimeout: 50 * time.Millisecond}
 	m = members()
 	start := time.Now()
-	a.addNames(context.Background(), "acme", m)
+	assert.False(t, a.addNames(context.Background(), "acme", m))
 	assert.Less(t, time.Since(start), 2*time.Second)
 	assert.Equal(t, members(), m)
 }
