@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -160,4 +161,51 @@ func TestUsersCache(t *testing.T) {
 		assert.False(t, found)
 	}
 	assert.Equal(t, 2, calls, "a miss is not cached")
+}
+
+func TestErrorsHaveNoQuery(t *testing.T) {
+	// A server that answers 500 for users, and one that is not there at all.
+	c := fake(t, func(w http.ResponseWriter, _ *http.Request) { http.Error(w, "boom", http.StatusInternalServerError) })
+	_, _, err := c.UserByUsername(context.Background(), "acme", "alice@example.com")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "alice", "the email is in the query")
+	assert.Contains(t, err.Error(), "/admin/realms/acme/users")
+
+	c = NewClient(context.Background(), "http://127.0.0.1:1", "reader", "s3cret")
+	_, _, err = c.UserByUsername(context.Background(), "acme", "alice@example.com")
+	require.Error(t, err)
+	assert.NotContains(t, err.Error(), "alice", "a transport error has the URL, too")
+}
+
+func TestHangingKeycloakTimesOut(t *testing.T) {
+	hang := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/realms/master/protocol/openid-connect/token" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprint(w, `{"access_token":"tok","token_type":"Bearer","expires_in":300}`)
+			return
+		}
+		<-hang
+	}))
+	t.Cleanup(func() { close(hang); srv.Close() })
+	c := NewClient(context.Background(), srv.URL, "reader", "s3cret")
+	// The client's own timeout applies although the context has no deadline.
+	assert.Equal(t, Timeout, c.http.Timeout)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.Realms(ctx)
+	require.Error(t, err)
+	assert.Less(t, time.Since(start), 2*time.Second)
+}
+
+func TestReadCredentials(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(dir+"/client_id", []byte("reader\n"), 0o600))
+	require.NoError(t, os.WriteFile(dir+"/client_secret", []byte("s3cret\n"), 0o600))
+	id, secret, err := ReadCredentials(dir+"/client_id", dir+"/client_secret")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"reader", "s3cret"}, []string{id, secret})
+	_, _, err = ReadCredentials(dir+"/client_id", dir+"/missing")
+	assert.Error(t, err)
 }

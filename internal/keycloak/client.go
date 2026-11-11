@@ -15,11 +15,19 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"sort"
 	"strconv"
+	"strings"
+	"time"
 
+	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/clientcredentials"
 )
+
+// Timeout limits every request to Keycloak, token requests included. Without
+// it a Keycloak that accepts a connection and then hangs would block the caller.
+const Timeout = 10 * time.Second
 
 // Client talks to the Keycloak admin API with a client of the master realm
 // that has a service account.
@@ -37,7 +45,26 @@ func NewClient(ctx context.Context, baseURL, clientID, clientSecret string) *Cli
 		ClientSecret: clientSecret,
 		TokenURL:     baseURL + "/realms/master/protocol/openid-connect/token",
 	}
-	return &Client{baseURL: baseURL, http: cc.Client(ctx)}
+	// The token requests use the client in the context, the API requests the
+	// one returned.
+	ctx = context.WithValue(ctx, oauth2.HTTPClient, &http.Client{Timeout: Timeout})
+	hc := cc.Client(ctx)
+	hc.Timeout = Timeout
+	return &Client{baseURL: baseURL, http: hc}
+}
+
+// ReadCredentials reads the client id and secret from the files of the mounted
+// Secret.
+func ReadCredentials(idFile, secretFile string) (id, secret string, err error) {
+	b, err := os.ReadFile(idFile)
+	if err != nil {
+		return "", "", err
+	}
+	s, err := os.ReadFile(secretFile)
+	if err != nil {
+		return "", "", err
+	}
+	return strings.TrimSpace(string(b)), strings.TrimSpace(string(s)), nil
 }
 
 // Realm is the part of a realm we need. ID changes when a realm is recreated.
@@ -137,9 +164,16 @@ func (c *Client) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
+	// Errors name the path only. The query can hold a user's email, and errors
+	// end up in logs.
+	path, _, _ = strings.Cut(path, "?")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return fmt.Errorf("GET %s: %w", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
