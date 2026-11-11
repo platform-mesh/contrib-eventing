@@ -109,7 +109,10 @@ to a single snapshot.
 - **Names.** `user.firstName` and `user.lastName` are set when Keycloak knows
   them. They are missing for users who have none, for example invited users who
   haven't set them yet, and for all users where eventing has no Keycloak access.
-  They can be up to five minutes old. Membership events never carry names.
+  They can be up to five minutes old. Names come for all members of a
+  snapshot or for none: if Keycloak can't be read in time, the snapshot has no
+  names at all. A missing name therefore does not mean it was removed; keep the
+  names you already have. Membership events never carry names.
 - **Only on change.** A snapshot is sent when the account's members change. A
   new Subscription, or one that missed a snapshot, gets an account's list with
   that account's next change.

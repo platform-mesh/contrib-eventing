@@ -40,6 +40,9 @@ type Adapter struct {
 	// Names adds first and last names to the members of a snapshot. Without it
 	// snapshots have no names.
 	Names NameLookup
+	// NameTimeout is the one deadline for all name lookups of a snapshot. Zero
+	// means DefaultNameTimeout.
+	NameTimeout time.Duration
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -221,20 +224,35 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	return a.publish(ctx, org, e)
 }
 
-// addNames fills in the names Keycloak knows. A Keycloak that cannot be reached
-// must not hold membership events back, so on an error the snapshot goes out
-// without names.
+// DefaultNameTimeout is how long a snapshot waits for all its names.
+const DefaultNameTimeout = 15 * time.Second
+
+// addNames fills in the names Keycloak knows, all or none: a snapshot with
+// names for some members only would make a consumer that replaces its copy
+// lose names it had. A Keycloak that cannot be reached must not hold
+// membership events back either, so within one deadline, and on any error the
+// snapshot goes out without names.
 func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) {
 	if a.Names == nil {
 		return
 	}
+	timeout := a.NameTimeout
+	if timeout == 0 {
+		timeout = DefaultNameTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	names := make([][2]string, len(members))
 	for i := range members {
 		first, last, err := a.Names.Names(ctx, org, members[i].User.ID)
 		if err != nil {
 			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read names, publishing without")
 			return
 		}
-		members[i].User.FirstName, members[i].User.LastName = first, last
+		names[i] = [2]string{first, last}
+	}
+	for i := range members {
+		members[i].User.FirstName, members[i].User.LastName = names[i][0], names[i][1]
 	}
 }
 

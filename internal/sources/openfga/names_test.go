@@ -7,6 +7,7 @@ package openfga
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -148,4 +149,38 @@ func TestSnapshotNames(t *testing.T) {
 		assert.NotContains(t, string(e.Data()), "firstName")
 		assert.NotContains(t, string(e.Data()), "lastName")
 	}
+}
+
+// flakyNames knows alice, fails for bob, or never answers.
+type flakyNames struct{ hang bool }
+
+func (f flakyNames) Names(ctx context.Context, _, userID string) (string, string, error) {
+	if f.hang {
+		<-ctx.Done()
+		return "", "", ctx.Err()
+	}
+	if userID == "alice@example.com" {
+		return "Alice", "Liddell", nil
+	}
+	return "", "", errors.New("keycloak failed")
+}
+
+func TestNamesAllOrNothing(t *testing.T) {
+	members := func() []contract.Member {
+		return []contract.Member{{User: contract.User{ID: "alice@example.com"}}, {User: contract.User{ID: "bob@example.com"}}}
+	}
+	a := &Adapter{Log: testlogger.New().HideLogOutput().Logger, Names: flakyNames{}}
+
+	// Alice is read, bob fails: nobody gets a name.
+	m := members()
+	a.addNames(context.Background(), "acme", m)
+	assert.Equal(t, members(), m)
+
+	// Keycloak hangs: the one deadline ends the name step and the snapshot goes out.
+	a = &Adapter{Log: testlogger.New().HideLogOutput().Logger, Names: flakyNames{hang: true}, NameTimeout: 50 * time.Millisecond}
+	m = members()
+	start := time.Now()
+	a.addNames(context.Background(), "acme", m)
+	assert.Less(t, time.Since(start), 2*time.Second)
+	assert.Equal(t, members(), m)
 }
