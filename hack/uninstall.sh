@@ -24,7 +24,7 @@ kcp root:providers:eventing delete subscriptions --all --timeout=60s >/dev/null 
 # because the ConfigMap with what was changed lives there.
 log "Reverting the Keycloak stopgap"
 stopgap=$(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o json 2>/dev/null || true)
-for realm in $(jq -r '.data // {} | keys[]' <<<"${stopgap:-null}"); do
+for realm in $(jq -r '.data // {} | keys[] | select(. != "contrib-eventing-keycloak-reader")' <<<"${stopgap:-null}"); do
   mode=$(jq -r --arg r "$realm" '.data[$r]' <<<"$stopgap")
   # The realm may be gone already.
   cfg=$(keycloak GET "/admin/realms/$realm/events/config" 2>/dev/null) || continue
@@ -36,9 +36,12 @@ for realm in $(jq -r '.data // {} | keys[]' <<<"${stopgap:-null}"); do
   esac
   keycloak PUT "/admin/realms/$realm/events/config" -o /dev/null -d "$new"
 done
-# Deleting the client drops its role mappings.
-reader_uuid=$(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader" | jq -r '.[0].id // empty')
-[[ -z $reader_uuid ]] || keycloak DELETE "/admin/realms/master/clients/$reader_uuid" -o /dev/null
+# Deleting the client drops its role mappings. Only if the stopgap created it:
+# a client that security-operator manages has to stay.
+if [[ $(jq -r '.data["contrib-eventing-keycloak-reader"] // empty' <<<"${stopgap:-null}") == created ]]; then
+  reader_uuid=$(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader" | jq -r '.[0].id // empty')
+  [[ -z $reader_uuid ]] || keycloak DELETE "/admin/realms/master/clients/$reader_uuid" -o /dev/null
+fi
 # The client for hack/login.sh, if the demo org is still there.
 login_uuid=$(keycloak GET "/admin/realms/$ORG/clients?clientId=contrib-eventing-login-test" 2>/dev/null | jq -r '.[0].id // empty' || true)
 [[ -z $login_uuid ]] || keycloak DELETE "/admin/realms/$ORG/clients/$login_uuid" -o /dev/null

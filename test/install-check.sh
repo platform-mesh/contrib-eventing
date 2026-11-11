@@ -82,7 +82,7 @@ if $uninstall; then
 
   [[ -z $(keycloak GET "/admin/realms/master/clients?clientId=contrib-eventing-keycloak-reader" | jq -r '.[0].id // empty') ]] &&
     pass "Keycloak reader client gone" || fail "Keycloak reader client still there"
-  for realm in $(jq -r 'keys[]' <<<"$stopgap"); do
+  for realm in $(jq -r 'keys[] | select(. != "contrib-eventing-keycloak-reader")' <<<"$stopgap"); do
     rep=$(keycloak GET "/admin/realms/$realm" 2>/dev/null) || continue
     case $(jq -r --arg r "$realm" '.[$r]' <<<"$stopgap") in
     enabled)
