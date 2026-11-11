@@ -8,8 +8,6 @@ package cmd
 import (
 	"context"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -92,7 +90,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 // not, snapshots have no names, which is what an install without Keycloak
 // access gets.
 func keycloakNames(ctx context.Context, cfg config.KeycloakConfig) openfga.NameLookup { // coverage-ignore
-	secret, err := os.ReadFile(cfg.ClientSecretFile)
+	clientID, secret, err := keycloak.ReadCredentials(cfg.ClientIDFile, cfg.ClientSecretFile)
 	if err != nil {
 		log.Info().Err(err).Msg("no Keycloak access, member snapshots have no names")
 		return nil
@@ -100,6 +98,6 @@ func keycloakNames(ctx context.Context, cfg config.KeycloakConfig) openfga.NameL
 	if cfg.UserClaim != "email" && cfg.UserClaim != "sub" {
 		log.Fatal().Str("userClaim", cfg.UserClaim).Msg("--user-claim must be email or sub")
 	}
-	kc := keycloak.NewClient(ctx, cfg.URL, cfg.ClientID, strings.TrimSpace(string(secret)))
+	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
 	return &openfga.KeycloakNames{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
 }

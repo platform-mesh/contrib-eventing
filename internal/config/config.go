@@ -42,9 +42,10 @@ func (c *SubscriptionControllerConfig) AddFlags(fs *pflag.FlagSet) {
 // KeycloakConfig is how components reach Keycloak, with a client of the master
 // realm that only has view-events and view-users.
 type KeycloakConfig struct {
-	URL      string
-	ClientID string
-	// ClientSecretFile holds the client's secret.
+	URL string
+	// ClientIDFile and ClientSecretFile are the keys of the mounted Secret, named
+	// like the ones security-operator writes for its clients.
+	ClientIDFile     string
 	ClientSecretFile string
 	// UserClaim is the claim Platform Mesh uses as user id: email or sub.
 	UserClaim string
@@ -55,8 +56,8 @@ type KeycloakConfig struct {
 func NewKeycloakConfig() KeycloakConfig {
 	return KeycloakConfig{
 		URL:              "http://keycloak-service.platform-mesh-system.svc.cluster.local:8080/keycloak",
-		ClientID:         "contrib-eventing-keycloak-reader",
-		ClientSecretFile: "/var/run/secrets/keycloak/client-secret",
+		ClientIDFile:     "/var/run/secrets/keycloak/client_id",
+		ClientSecretFile: "/var/run/secrets/keycloak/client_secret",
 		UserClaim:        "email",
 		NameTTL:          5 * time.Minute,
 	}
@@ -64,7 +65,7 @@ func NewKeycloakConfig() KeycloakConfig {
 
 func (c *KeycloakConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.URL, "keycloak-url", c.URL, "Keycloak URL including its relative path")
-	fs.StringVar(&c.ClientID, "keycloak-client-id", c.ClientID, "client of the master realm with view-events and view-users")
+	fs.StringVar(&c.ClientIDFile, "keycloak-client-id-file", c.ClientIDFile, "file with the id of the client of the master realm that has view-events and view-users")
 	fs.StringVar(&c.ClientSecretFile, "keycloak-client-secret-file", c.ClientSecretFile, "file with the client's secret")
 	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim Platform Mesh uses as user id, email or sub")
 	fs.DurationVar(&c.NameTTL, "name-ttl", c.NameTTL, "how long user names are remembered")

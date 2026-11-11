@@ -8,8 +8,6 @@ package cmd
 import (
 	"context"
 	"net/http"
-	"os"
-	"strings"
 	"time"
 
 	cloudevents "github.com/cloudevents/sdk-go/v2"
@@ -47,9 +45,9 @@ func runKeycloakAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	if cfg.UserClaim != kcadapter.ClaimEmail && cfg.UserClaim != kcadapter.ClaimSub {
 		log.Fatal().Str("userClaim", cfg.UserClaim).Msg("--user-claim must be email or sub")
 	}
-	secret, err := os.ReadFile(cfg.ClientSecretFile)
+	clientID, secret, err := keycloak.ReadCredentials(cfg.ClientIDFile, cfg.ClientSecretFile)
 	if err != nil {
-		log.Fatal().Err(err).Msg("unable to read the Keycloak client secret")
+		log.Fatal().Err(err).Msg("unable to read the Keycloak client credentials")
 	}
 	ctrl.SetLogger(log.ComponentLogger("controller-runtime").Logr())
 	ctx, _, shutdown := pmcontext.StartContext(log, cfg, defaultCfg.ShutdownTimeout)
@@ -65,7 +63,7 @@ func runKeycloakAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 
 	pub := &publish.Publisher{Client: &http.Client{Timeout: 10 * time.Second}, TokenFile: cfg.TokenFile}
-	kc := keycloak.NewClient(ctx, cfg.URL, cfg.ClientID, strings.TrimSpace(string(secret)))
+	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
 	a := &kcadapter.Adapter{
 		KC:         kc,
 		Users:      &keycloak.Users{Client: kc, TTL: cfg.NameTTL},

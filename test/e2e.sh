@@ -103,7 +103,7 @@ sleep 15
 [[ $(logins) == "$total" ]] && pass "no duplicates after a restart" || fail "logins published again"
 
 log "The reader token has no admin"
-reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client-secret}' | base64 -d)
+reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client_secret}' | base64 -d)
 reader_token=$(printf %s "$reader_secret" | curl -sS --fail-with-body --cacert "$SECRET_DIR/domain-ca.crt" \
   --resolve "$BASE_DOMAIN:$PORT:$INGRESS_ADDRESS" \
   "https://$BASE_DOMAIN:$PORT/keycloak/realms/master/protocol/openid-connect/token" \

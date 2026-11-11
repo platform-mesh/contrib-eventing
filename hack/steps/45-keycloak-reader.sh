@@ -18,6 +18,15 @@ KEYCLOAK_READER=contrib-eventing-keycloak-reader
 # lost if the adapter is down that long.
 KEYCLOAK_EVENTS_RETENTION=${KEYCLOAK_EVENTS_RETENTION:-604800}
 
+# Once security-operator manages the reader client (platform-mesh#606,
+# --idp-events-reader-client), it also owns the client, its roles and the event
+# store, and this step must not touch them.
+if kind_kubectl -n platform-mesh-system get deploy security-operator -o json |
+  jq -e '[.spec.template.spec.containers[].args // [] | .[] | select(startswith("--idp-events-reader-client="))] | length > 0' >/dev/null; then
+  log "security-operator manages the Keycloak reader client, skipping the stopgap"
+  return 0
+fi
+
 log "Setting up the Keycloak reader client (stopgap until platform-mesh#578)"
 
 reader_uuid=$(keycloak GET "/admin/realms/master/clients?clientId=$KEYCLOAK_READER" | jq -r '.[0].id // empty')
@@ -28,19 +37,23 @@ if [[ -z $reader_uuid ]]; then
     publicClient: false, serviceAccountsEnabled: true, standardFlowEnabled: false,
     directAccessGrantsEnabled: false, clientAuthenticatorType: "client-secret"}')"
   reader_uuid=$(keycloak GET "/admin/realms/master/clients?clientId=$KEYCLOAK_READER" | jq -r '.[0].id')
+  created_client=true
 fi
 reader_sa=$(keycloak GET "/admin/realms/master/clients/$reader_uuid/service-account-user" | jq -r .id)
 
 kind_kubectl -n "$NS" create configmap keycloak-reader-stopgap --dry-run=client -o yaml |
   kind_kubectl -n "$NS" create -f - >/dev/null 2>&1 || true
 
-# record <realm> <enabled|added-login>: adds the key, never rewrites one.
+# record <realm|client> <enabled|added-login|created>: adds the key, never rewrites one.
 record() {
   if [[ -z $(kind_kubectl -n "$NS" get configmap keycloak-reader-stopgap -o "jsonpath={.data['$1']}") ]]; then
     kind_kubectl -n "$NS" patch configmap keycloak-reader-stopgap --type merge \
       -p "$(jq -nc --arg r "$1" --arg v "$2" '{data: {($r): $v}}')" >/dev/null
   fi
 }
+
+# Only a client this step created is deleted by uninstall.sh.
+[[ ${created_client:-false} != true ]] || record "$KEYCLOAK_READER" created
 
 for realm in $(keycloak GET /admin/realms | jq -r '.[].realm'); do
   [[ $realm == master || $realm == welcome ]] && continue
@@ -71,5 +84,5 @@ done
 # The secret is read, never regenerated, so a second install changes nothing.
 keycloak GET "/admin/realms/master/clients/$reader_uuid/client-secret" | jq -j .value |
   kind_kubectl -n "$NS" create secret generic "$KEYCLOAK_READER" \
-    --from-literal=client-id="$KEYCLOAK_READER" --from-file=client-secret=/dev/stdin \
+    --from-literal=client_id="$KEYCLOAK_READER" --from-file=client_secret=/dev/stdin \
     --dry-run=client -o yaml | kind_kubectl apply -f - >/dev/null
