@@ -20,9 +20,12 @@ KEYCLOAK_EVENTS_RETENTION=${KEYCLOAK_EVENTS_RETENTION:-604800}
 
 # Once security-operator manages the reader client (platform-mesh#606,
 # --idp-events-reader-client), it also owns the client, its roles and the event
-# store, and this step must not touch them.
-if kind_kubectl -n platform-mesh-system get deploy security-operator -o json |
-  jq -e '[.spec.template.spec.containers[].args // [] | .[] | select(startswith("--idp-events-reader-client="))] | length > 0' >/dev/null; then
+# store, and this step must not touch them. The flag is on the
+# security-operator-system Deployment; every security-operator Deployment is
+# checked, so a move of the flag doesn't matter.
+if kind_kubectl -n platform-mesh-system get deploy -o json |
+  jq -e '[.items[] | select(.metadata.name | startswith("security-operator")) | .spec.template.spec.containers[].args // [] | .[] |
+    select(startswith("--idp-events-reader-client="))] | length > 0' >/dev/null; then
   log "security-operator manages the Keycloak reader client, skipping the stopgap"
   return 0
 fi
