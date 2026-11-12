@@ -142,7 +142,7 @@ func TestSnapshotNames(t *testing.T) {
 	m = snapshot(t)
 	require.Len(t, m.Members, 2)
 	assert.Equal(t, contract.User{ID: "alice@example.com"}, m.Members[0].User)
-	assert.Equal(t, []string{contract.ErrorNamesUnavailable}, m.Errors, "the snapshot says why it has no names")
+	assert.Equal(t, []contract.SnapshotError{contract.ErrorNamesUnavailable}, m.Errors, "the snapshot says why it has no names")
 
 	// No lookup configured: the JSON has no name fields and no errors.
 	a.Names = nil

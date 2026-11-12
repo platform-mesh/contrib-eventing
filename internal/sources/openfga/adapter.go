@@ -210,7 +210,7 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	if err != nil {
 		return err
 	}
-	var problems []string
+	var problems []contract.SnapshotError
 	if !a.addNames(ctx, org, members) {
 		problems = append(problems, contract.ErrorNamesUnavailable)
 	}

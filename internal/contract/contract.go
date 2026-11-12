@@ -70,14 +70,21 @@ type AccountMembers struct {
 	AccountID   string   `json:"accountId"`
 	AccountPath string   `json:"accountPath,omitempty"`
 	Members     []Member `json:"members"`
-	// Errors lists what went wrong while the snapshot was built, as codes from
-	// the contract. Empty when nothing did.
-	Errors []string `json:"errors,omitempty"`
+	// Errors lists what went wrong while the snapshot was built. Empty when
+	// nothing did.
+	Errors []SnapshotError `json:"errors,omitempty"`
 }
 
-// ErrorNamesUnavailable means the names could not be read from Keycloak, so the
-// snapshot has none, though some members may have them.
-const ErrorNamesUnavailable = "namesUnavailable"
+// SnapshotError is one of a fixed set of codes, so subscribers can switch on
+// them. A new code is a contract change and goes into docs/contract.md and the
+// OpenAPI enum.
+type SnapshotError string
+
+const (
+	// ErrorNamesUnavailable means the names could not be read from Keycloak, so
+	// the snapshot has none, though some members may have them.
+	ErrorNamesUnavailable SnapshotError = "namesUnavailable"
+)
 
 // AccountID is the logical cluster of the workspace that holds the Account
 // object and the account's name, the same pair AccountInfo shows as

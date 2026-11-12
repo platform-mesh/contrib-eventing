@@ -94,7 +94,7 @@ func TestSnapshotErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotContains(t, string(ok.Data()), "errors")
 
-	m.Errors = []string{ErrorNamesUnavailable}
+	m.Errors = []SnapshotError{ErrorNamesUnavailable}
 	bad, err := MembersSnapshot(m, "k", time.Unix(0, 0))
 	require.NoError(t, err)
 	assert.Contains(t, string(bad.Data()), `"errors":["namesUnavailable"]`)
