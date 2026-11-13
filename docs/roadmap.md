@@ -16,12 +16,13 @@ Each milestone ends with something that runs on a local kind setup.
 3. **Logins and names.** Login events from the Keycloak event store, and first
    and last names in member snapshots. security-operator provides the event
    store and read-only Keycloak access. Details: [milestone 3](milestone-3.md).
-4. **Installable module.** Published images and chart, install through
-   `ManagedProvider`, automatic binding for new orgs, more than one shard,
-   installations other than kind. Providers get a way to publish their own
-   events through the ingress.
+4. **Installable module and provider events.** Published images, chart and
+   OCM component, install through `ManagedProvider` on any Platform Mesh, CI.
+   Providers publish their own events through the ingress. Details:
+   [milestone 4](milestone-4.md).
 5. **Later.** User created and deleted from the `User` CRD of ADR 018, for any
-   IdP. Org- and account-level subscriptions, kcp resource events.
+   IdP. Org- and account-level subscriptions, kcp resource events, more than
+   one kcp shard.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
 Kafka and the like run on the subscriber side.

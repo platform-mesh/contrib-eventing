@@ -116,10 +116,10 @@ security-operator, so its owners have to agree.
      milestone 4, the installable module moves to 5.
    - c) Both into milestone 4.
 
-   **Proposal: b)**: the RFC has to be agreed before the module is published,
-   and provider publishing is its own design (auth for senders outside the
-   cluster). Milestone 2 already moved provider publishing into milestone 4,
-   next to the installable module; splitting them is part of this decision.
+   **Decided: c)**: provider publishing and the installable module both go
+   into milestone 4, as two parts with their own issues that can run in
+   parallel. Provider publishing starts with its own ADR. See
+   [milestone 4](milestone-4.md).
 
 ## Order
 
