@@ -37,6 +37,12 @@ type Adapter struct {
 	FGA *Client
 	// Paths knows account paths. Without it events have no accountPath.
 	Paths *AccountPaths
+	// Names adds first and last names to the members of a snapshot. Without it
+	// snapshots have no names.
+	Names NameLookup
+	// NameTimeout is the one deadline for all name lookups of a snapshot. Zero
+	// means DefaultNameTimeout.
+	NameTimeout time.Duration
 	// SkipStores are stores that do not belong to an org.
 	SkipStores []string
 	Kube       ctrlruntimeclient.Client
@@ -204,17 +210,57 @@ func (a *Adapter) publishMembers(ctx context.Context, org, storeID string, m mem
 	if err != nil {
 		return err
 	}
+	var problems []contract.SnapshotError
+	if !a.addNames(ctx, org, members) {
+		problems = append(problems, contract.ErrorNamesUnavailable)
+	}
 	e, err := contract.MembersSnapshot(contract.AccountMembers{
 		Org:         org,
 		Account:     m.account,
 		AccountID:   contract.AccountID(m.cluster, m.account),
 		AccountPath: path,
 		Members:     members,
+		Errors:      problems,
 	}, changeKey(last), time.Now())
 	if err != nil {
 		return err
 	}
 	return a.publish(ctx, org, e)
+}
+
+// DefaultNameTimeout is how long a snapshot waits for all its names.
+const DefaultNameTimeout = 15 * time.Second
+
+// addNames fills in the names Keycloak knows, all or none: a snapshot with
+// names for some members only would make a consumer that replaces its copy
+// lose names it had. A Keycloak that cannot be reached must not hold
+// membership events back either, so within one deadline, and on any error the
+// snapshot goes out without names. It returns false if names could not be read,
+// which the snapshot reports in its errors. Without a lookup there is nothing
+// to report.
+func (a *Adapter) addNames(ctx context.Context, org string, members []contract.Member) bool {
+	if a.Names == nil {
+		return true
+	}
+	timeout := a.NameTimeout
+	if timeout == 0 {
+		timeout = DefaultNameTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	names := make([][2]string, len(members))
+	for i := range members {
+		first, last, err := a.Names.Names(ctx, org, members[i].User.ID)
+		if err != nil {
+			a.Log.Warn().Err(err).Str("org", org).Msg("cannot read names, publishing without")
+			return false
+		}
+		names[i] = [2]string{first, last}
+	}
+	for i := range members {
+		members[i].User.FirstName, members[i].User.LastName = names[i][0], names[i][1]
+	}
+	return true
 }
 
 func (a *Adapter) accountPath(m membership, at time.Time) (string, error) {

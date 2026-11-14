@@ -26,7 +26,7 @@ var rootCmd = &cobra.Command{
 
 func init() {
 	defaultCfg.AddFlags(rootCmd.PersistentFlags())
-	rootCmd.AddCommand(subscriptionControllerCmd, openFGAAdapterCmd, ingressCmd)
+	rootCmd.AddCommand(subscriptionControllerCmd, openFGAAdapterCmd, keycloakAdapterCmd, ingressCmd)
 	cobra.OnInitialize(initLog)
 }
 

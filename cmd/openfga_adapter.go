@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/platform-mesh/contrib-eventing/internal/config"
+	"github.com/platform-mesh/contrib-eventing/internal/keycloak"
 	"github.com/platform-mesh/contrib-eventing/internal/publish"
 	"github.com/platform-mesh/contrib-eventing/internal/sources/openfga"
 	pmcontext "go.platform-mesh.io/golang-commons/context"
@@ -68,6 +69,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
+	a.Names = keycloakNames(ctx, cfg.KeycloakConfig)
 	if cfg.CoreKubeconfig != "" {
 		coreCfg, err := clientcmd.BuildConfigFromFlags("", cfg.CoreKubeconfig)
 		if err != nil {
@@ -78,8 +80,24 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			log.Fatal().Err(err).Msg("unable to watch account paths")
 		}
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Msg("starting adapter")
+	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Bool("names", a.Names != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}
+}
+
+// keycloakNames reads names from Keycloak if the reader's secret is there. If
+// not, snapshots have no names, which is what an install without Keycloak
+// access gets.
+func keycloakNames(ctx context.Context, cfg config.KeycloakConfig) openfga.NameLookup { // coverage-ignore
+	clientID, secret, err := keycloak.ReadCredentials(cfg.ClientIDFile, cfg.ClientSecretFile)
+	if err != nil {
+		log.Info().Err(err).Msg("no Keycloak access, member snapshots have no names")
+		return nil
+	}
+	if cfg.UserClaim != "email" && cfg.UserClaim != "sub" {
+		log.Fatal().Str("userClaim", cfg.UserClaim).Msg("--user-claim must be email or sub")
+	}
+	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
+	return &openfga.KeycloakNames{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
 }

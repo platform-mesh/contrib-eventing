@@ -9,7 +9,9 @@ Today, when someone is added to an account, a user logs in, or a provider change
 ```mermaid
 flowchart LR
   fga[(OpenFGA)] -- changelog --> adapter[OpenFGA adapter]
+  kc[(Keycloak)] -- login events --> kcadapter[Keycloak adapter]
   adapter -- event --> ingress[Ingress]
+  kcadapter -- event --> ingress
   ingress -- checked sender --> delivery["Delivery<br/>(Knative, NATS JetStream)"]
   delivery -- event --> sink[Your endpoint]
   subs[Subscription in kcp] -. what goes where .-> delivery
@@ -17,7 +19,7 @@ flowchart LR
 
 OpenFGA can't send events, so the adapter reads its changelog and turns a change like "Alice became member of team-a" into an event. A platform admin creates a Subscription in the eventing workspace in kcp (which events, which URL), and delivery sends matching events there, with retries. There is one stream for the whole platform; every event names the org it belongs to.
 
-Later more systems get adapters (Keycloak, kcp), and providers will be able to send their own events too.
+A second adapter reads Keycloak's event store and sends an event after every login. Later more systems get adapters (kcp), and providers will be able to send their own events too.
 
 More detail: [architecture](docs/architecture.md), [event contract](docs/contract.md), [receiving events](docs/subscribing.md), [decisions](docs/adr/).
 
@@ -30,7 +32,9 @@ More detail: [architecture](docs/architecture.md), [event contract](docs/contrac
 
 - Membership events (a user gets or loses a role on an account) and a snapshot
   of an account's members after each change, read from OpenFGA. Events carry the
-  account's workspace path.
+  account's workspace path. The snapshot has the members' first and last names
+  where Keycloak knows them.
+- A login event after every login to an org's Keycloak realm.
 - Subscriptions for platform admins, covering all orgs or some of them, with
   retries, timeouts and dead letter sinks. Sinks must be on the platform
   operator's allowlist.
@@ -50,6 +54,14 @@ single NATS JetStream server; Knative in that cluster must be used by eventing o
 ./hack/add-member.sh  # gives a user the member role on the demo org
 kubectl -n eventing-demo-sink logs deploy/event-display
 ```
+
+The install also sets up read-only access to Keycloak, as a stopgap until Platform
+Mesh provides it ([platform-mesh/platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578)):
+a client in the `master` realm with only `view-events` and `view-users` on the org realms, and the
+event store of the org realms switched on for logins, with 7 days of retention
+(`KEYCLOAK_EVENTS_RETENTION`, in seconds). `hack/uninstall.sh` undoes exactly that. Orgs created
+after the install are not covered until #578 lands; running `./hack/install.sh` again covers them.
+The demo user can log in with `./hack/login.sh`, which makes the sink show a `user.loggedin` event.
 
 The sink shows a `membership.granted` event. `./hack/add-member.sh --remove`
 takes the role away again, `./test/e2e.sh` checks the whole path,

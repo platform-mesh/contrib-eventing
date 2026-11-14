@@ -21,6 +21,7 @@ const (
 	TypeMembershipGranted = "io.platform-mesh.iam.membership.granted.v1alpha1"
 	TypeMembershipRevoked = "io.platform-mesh.iam.membership.revoked.v1alpha1"
 	TypeAccountMembers    = "io.platform-mesh.iam.account.members.v1alpha1"
+	TypeUserLoggedIn      = "io.platform-mesh.iam.user.loggedin.v1alpha1"
 
 	// OrgExtension carries the org name, so subscribers can filter without
 	// reading the payload.
@@ -31,6 +32,17 @@ const (
 // user claim the platform admin configured, email by default.
 type User struct {
 	ID string `json:"id"`
+	// FirstName and LastName are set where Keycloak knows them. Only the
+	// member snapshots carry them.
+	FirstName string `json:"firstName,omitempty"`
+	LastName  string `json:"lastName,omitempty"`
+}
+
+// UserLoggedIn is a login in one of the org's realms. It has no IP address,
+// session or client.
+type UserLoggedIn struct {
+	Org  string `json:"org"`
+	User User   `json:"user"`
 }
 
 type Membership struct {
@@ -58,7 +70,21 @@ type AccountMembers struct {
 	AccountID   string   `json:"accountId"`
 	AccountPath string   `json:"accountPath,omitempty"`
 	Members     []Member `json:"members"`
+	// Errors lists what went wrong while the snapshot was built. Empty when
+	// nothing did.
+	Errors []SnapshotError `json:"errors,omitempty"`
 }
+
+// SnapshotError is one of a fixed set of codes, so subscribers can switch on
+// them. A new code is a contract change and goes into docs/contract.md and the
+// OpenAPI enum.
+type SnapshotError string
+
+const (
+	// ErrorNamesUnavailable means the names could not be read from Keycloak, so
+	// the snapshot has none, though some members may have them.
+	ErrorNamesUnavailable SnapshotError = "namesUnavailable"
+)
 
 // AccountID is the logical cluster of the workspace that holds the Account
 // object and the account's name, the same pair AccountInfo shows as
@@ -74,7 +100,7 @@ func MembershipChanged(granted bool, m Membership, changeKey string, at time.Tim
 	if granted {
 		typ = TypeMembershipGranted
 	}
-	return newEvent(typ, m.Org, m.AccountID, id(m.Org, changeKey), at, m)
+	return newEvent(typ, m.Org, "accounts/"+m.AccountID, id(m.Org, changeKey), at, m)
 }
 
 // MembersSnapshot builds a members event. at is when the list was read. The id
@@ -90,15 +116,21 @@ func MembersSnapshot(m AccountMembers, changeKey string, at time.Time) (cloudeve
 	if err != nil {
 		return cloudevents.Event{}, err
 	}
-	return newEvent(TypeAccountMembers, m.Org, m.AccountID, id(m.Org, TypeAccountMembers, changeKey, string(data)), at, m)
+	return newEvent(TypeAccountMembers, m.Org, "accounts/"+m.AccountID, id(m.Org, TypeAccountMembers, changeKey, string(data)), at, m)
 }
 
-func newEvent(typ, org, accountID, eventID string, at time.Time, data any) (cloudevents.Event, error) {
+// LoggedIn builds a login event. keycloakEventID is the id of the stored
+// Keycloak event, so a repeat gives the same event id. at is the login time.
+func LoggedIn(org string, user User, keycloakEventID string, at time.Time) (cloudevents.Event, error) {
+	return newEvent(TypeUserLoggedIn, org, "users/"+user.ID, id(org, "keycloak", keycloakEventID), at, UserLoggedIn{Org: org, User: user})
+}
+
+func newEvent(typ, org, subject, eventID string, at time.Time, data any) (cloudevents.Event, error) {
 	e := cloudevents.NewEvent()
 	e.SetID(eventID)
 	e.SetType(typ)
 	e.SetSource("platform-mesh.io/orgs/" + org + "/iam")
-	e.SetSubject("accounts/" + accountID)
+	e.SetSubject(subject)
 	e.SetTime(at)
 	e.SetExtension(OrgExtension, org)
 	err := e.SetData(cloudevents.ApplicationJSON, data)

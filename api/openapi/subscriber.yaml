@@ -122,6 +122,41 @@ webhooks:
           $ref: '#/components/responses/Retried'
         default:
           $ref: '#/components/responses/Failed'
+  userLoggedIn:
+    post:
+      operationId: userLoggedIn
+      summary: A user logged in to an org's Keycloak realm.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.user.loggedin.v1alpha1
+        - $ref: '#/components/parameters/ceSubjectUser'
+        - name: ce-time
+          in: header
+          required: true
+          description: When the user logged in.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/UserLoggedIn'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '408':
+          $ref: '#/components/responses/Retried'
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
 components:
   parameters:
     ceSpecversion:
@@ -154,6 +189,14 @@ components:
         type: string
         pattern: ^accounts/[^/]+/[^/]+$
       example: accounts/a5zld11wopsu1uea/team-a
+    ceSubjectUser:
+      name: ce-subject
+      in: header
+      required: true
+      schema:
+        type: string
+        pattern: ^users/.+$
+      example: users/alice@example.com
     ceTime:
       name: ce-time
       in: header
@@ -185,6 +228,16 @@ components:
             role: member
             user:
               id: alice@example.com
+    UserLoggedIn:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserLoggedIn'
+          example:
+            org: acme
+            user:
+              id: alice@example.com
     AccountMembers:
       required: true
       content:
@@ -199,6 +252,8 @@ components:
             members:
               - user:
                   id: alice@example.com
+                  firstName: Alice
+                  lastName: Liddell
                 roles: [owner]
               - user:
                   id: bob@example.com
@@ -257,6 +312,25 @@ components:
           description: Everyone with a role on the account, sorted by user id. Empty if the account was deleted.
           items:
             $ref: '#/components/schemas/Member'
+        errors:
+          type: array
+          description: |
+            Only there if something went wrong while the snapshot was built. The members list
+            is complete anyway.
+            `namesUnavailable`: the names could not be read from Keycloak, so no member has
+            one. Keep the names you already have.
+          items:
+            type: string
+            enum: [namesUnavailable]
+    UserLoggedIn:
+      type: object
+      required: [org, user]
+      properties:
+        org:
+          type: string
+          description: Org name.
+        user:
+          $ref: '#/components/schemas/User'
     Member:
       type: object
       required: [user, roles]
@@ -278,3 +352,11 @@ components:
             The value Platform Mesh authorizes the user with: the claim the platform admin
             configured (security-operator --user-claim), email by default. Invitations are
             written with the email, also with the sub claim.
+        firstName:
+          type: string
+          description: |
+            Only in members snapshots, and only if Keycloak knows it and eventing can read
+            it. Up to five minutes old.
+        lastName:
+          type: string
+          description: Like firstName.

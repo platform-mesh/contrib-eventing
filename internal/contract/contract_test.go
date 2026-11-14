@@ -6,6 +6,7 @@ SPDX-License-Identifier: Apache-2.0
 package contract
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -64,4 +65,44 @@ func TestMembersSnapshot(t *testing.T) {
 	empty, err := MembersSnapshot(AccountMembers{Org: "acme"}, "change-2", time.Unix(0, 0))
 	require.NoError(t, err)
 	assert.Contains(t, string(empty.Data()), `"members":[]`)
+}
+
+func TestLoggedIn(t *testing.T) {
+	at := time.UnixMilli(1760000000123)
+	e, err := LoggedIn("acme", User{ID: "alice@example.com"}, "kc-event-1", at)
+	require.NoError(t, err)
+	require.NoError(t, e.Validate())
+
+	assert.Equal(t, TypeUserLoggedIn, e.Type())
+	assert.Equal(t, "platform-mesh.io/orgs/acme/iam", e.Source())
+	assert.Equal(t, "users/alice@example.com", e.Subject())
+	assert.Equal(t, "acme", e.Extensions()[OrgExtension])
+	assert.True(t, e.Time().Equal(at), "time is the login time")
+	assert.JSONEq(t, `{"org":"acme","user":{"id":"alice@example.com"}}`, string(e.Data()))
+
+	again, _ := LoggedIn("acme", User{ID: "alice@example.com"}, "kc-event-1", time.Unix(5, 0))
+	other, _ := LoggedIn("acme", User{ID: "alice@example.com"}, "kc-event-2", at)
+	otherOrg, _ := LoggedIn("beta", User{ID: "alice@example.com"}, "kc-event-1", at)
+	assert.Equal(t, e.ID(), again.ID(), "same Keycloak event, same id")
+	assert.NotEqual(t, e.ID(), other.ID())
+	assert.NotEqual(t, e.ID(), otherOrg.ID())
+}
+
+func TestSnapshotErrors(t *testing.T) {
+	m := AccountMembers{Org: "acme", Account: "a", AccountID: AccountID("c", "a")}
+	ok, err := MembersSnapshot(m, "k", time.Unix(0, 0))
+	require.NoError(t, err)
+	assert.NotContains(t, string(ok.Data()), "errors")
+
+	m.Errors = []SnapshotError{ErrorNamesUnavailable}
+	bad, err := MembersSnapshot(m, "k", time.Unix(0, 0))
+	require.NoError(t, err)
+	assert.Contains(t, string(bad.Data()), `"errors":["namesUnavailable"]`)
+	assert.NotEqual(t, ok.ID(), bad.ID(), "a snapshot with errors is another event")
+}
+
+func TestUserNames(t *testing.T) {
+	b, err := json.Marshal(Member{User: User{ID: "a", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"user":{"id":"a","firstName":"Ada","lastName":"Lovelace"},"roles":["member"]}`, string(b))
 }

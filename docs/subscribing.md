@@ -1,6 +1,6 @@
 # Receiving events
 
-This is for platform admins who want the membership events of the platform
+This is for platform admins who want the membership and login events of the platform
 delivered to their own HTTP endpoint.
 
 ## 1. Provide an endpoint
@@ -52,6 +52,7 @@ spec:
       - io.platform-mesh.iam.membership.granted.v1alpha1
       - io.platform-mesh.iam.membership.revoked.v1alpha1
       - io.platform-mesh.iam.account.members.v1alpha1
+      - io.platform-mesh.iam.user.loggedin.v1alpha1
     orgs: [acme]   # optional; without it you get all orgs
   sink:
     uri: http://my-consumer.my-namespace.svc.cluster.local
@@ -94,7 +95,7 @@ flowchart TD
 ```
 
 The Subscription is ready when `READY` is `True`; otherwise `REASON` says what
-is missing. Events start arriving with the next membership change. Deleting the
+is missing. Events start arriving with the next change or login. Deleting the
 Subscription stops delivery.
 
 ## Limits

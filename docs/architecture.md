@@ -6,7 +6,7 @@ This page explains the parts of the eventing module and how an event travels thr
 
 Eventing tells other systems when something changes in the platform, so they don't have to poll for it.
 
-- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account (OpenFGA changelog). After a change it also sends the full member list of the account, so a consumer can catch up even if it missed events.
+- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account (OpenFGA changelog) and who logged in (Keycloak event store). After a membership change it also sends the full member list of the account, with names from Keycloak where it has access, so a consumer can catch up even if it missed events.
 - **Events.** Every event has the same shape: a type, an id, the org it belongs to, and the data (CloudEvents over HTTP, see the [contract](contract.md)).
 - **Ingress.** All events enter through one front door. It checks who is sending before it accepts anything (Kubernetes token review, behind the platform's Gateway).
 - **Broker.** The broker stores each event before it says "accepted", so a restart loses nothing (Knative Eventing with a NATS JetStream channel). It keeps events for a day.
@@ -22,6 +22,7 @@ Eventing tells other systems when something changes in the platform, so they don
 flowchart LR
   subgraph PM[Platform Mesh]
     fga[(OpenFGA)]
+    kc[(Keycloak)]
     info["AccountInfo<br/>in every account workspace"]
   end
   subgraph Admin["root:providers:eventing"]
@@ -29,6 +30,7 @@ flowchart LR
   end
   subgraph Module[Eventing module]
     adapter[OpenFGA adapter]
+    kcadapter[Keycloak adapter]
     ing[Ingress]
     ctrl[Subscription controller]
   end
@@ -39,6 +41,9 @@ flowchart LR
   end
   fga -- changelog and members --> adapter
   info -. "watched through core.platform-mesh.io" .-> adapter
+  kc -- "login events, names" --> kcadapter
+  kc -. "names, optional" .-> adapter
+  kcadapter -- events --> ing
   adapter -- events --> ing
   ing -- checked sender --> bi
   bi -- stored --> ch
@@ -55,7 +60,8 @@ Knative be reached only from the part before it (see
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has first and last names | us |
+| Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in `root:providers:eventing`: event types, optional orgs, target URL, retry settings | us |
 | Subscription controller | Checks the sink against the operator's allowlist, turns each Subscription into a Knative Trigger and reports status back | us |
@@ -101,6 +107,15 @@ sequenceDiagram
 4. A Subscription asked for membership events (of all orgs, or of `acme`). Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
 
+### A login
+
+The Keycloak adapter works the same way, with Keycloak's event store instead of a changelog. Example: Alice logs in to the portal of org `acme`.
+
+1. Keycloak stores a `LOGIN` event in the realm `acme`. The install switches the store on for logins only, and the events are kept for seven days.
+2. The Keycloak adapter polls the stored events of every org realm (not `master` or `welcome`). Each realm has a cursor, the time of the last event it published, kept in a ConfigMap. Keycloak includes events at exactly that time, so the cursor also keeps the ids of the events at that time it has already sent.
+3. For each new event it looks up the user to get the id the platform's user claim has (the email by default, the Keycloak id with `sub`), builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. The cursor only moves after every event of a page was accepted.
+4. From the ingress on, the event travels like any other.
+
 ## Tenancy
 
 Subscriptions are for platform admins. They live in the provider workspace `root:providers:eventing`, which binds its own export. The export has no `APIExportPolicy`, so orgs cannot bind it.
@@ -117,6 +132,7 @@ The module does not change Platform Mesh components. It needs:
 - read access to the OpenFGA changelog and tuples;
 - a watch on `AccountInfo` in all workspaces through the `core.platform-mesh.io` export, for account paths: a provider connection like the one iam-service gets. Paths of deleted accounts stay in memory, so the last events about them still carry the path. A change of an account the adapter doesn't know waits up to a minute after the change for its `AccountInfo`; older changes of unknown accounts are of accounts deleted meanwhile and go out without a path. If a shard's `AccountInfo`s don't load within five minutes, the adapter stops waiting for them;
 - Knative Eventing and its NATS JetStream channel in the cluster, used by eventing only. Knative's broker ingress, the channel and the broker filter accept any event from inside the cluster, which is why our own ingress sits in front of them: NetworkPolicies let only our ingress reach the broker ingress, only the broker ingress reach the channel, and only the channel reach the broker filter. NATS has no auth, so a NetworkPolicy lets only the channel's controller and dispatcher connect to it. These parts are shared by every broker in the cluster;
+- for logins and names, read access to Keycloak: a client in the `master` realm with `view-events` and `view-users` on the org realms, and the event store of those realms switched on for logins. Platform Mesh is to provide both ([platform-mesh/platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578)); until then `hack/steps/45-keycloak-reader.sh` does it, see the known gaps;
 - an HTTPRoute on the platform's Gateway, so publishers outside the cluster can reach the ingress.
 
 If eventing is not installed, Platform Mesh works exactly as before.
@@ -132,6 +148,9 @@ If eventing is not installed, Platform Mesh works exactly as before.
 ## Known gaps
 
 These are open work:
+
+- **Keycloak access is a stopgap.** Until platform-mesh/platform-mesh#578 lands, `hack/steps/45-keycloak-reader.sh` creates the reader client in `master`, grants it `view-events` and `view-users` on every org realm that exists at install time, and switches those realms' event stores on for `LOGIN`. Orgs created later are not covered until #578 lands or the install runs again. The step records what it changed in the ConfigMap `keycloak-reader-stopgap`, and `hack/uninstall.sh` reverts exactly that, deleting the reader client only if the step created it. When security-operator runs with `--idp-events-reader-client` (platform-mesh/platform-mesh#606), the step does nothing: security-operator owns the client, its roles and the event store, and the secret with the keys `client_id` and `client_secret` has to be copied into the `contrib-eventing` namespace.
+- **Logins can be lost.** The event store keeps events for seven days (configurable at install). If the Keycloak adapter is down for longer, the logins in between are never published. Without Keycloak access, there are no login events and no names.
 
 - A Subscription deleted while the JetStream channel's controller or dispatcher is down leaves its consumer behind in NATS. It holds no events, since the stream drops old events by age and size anyway; `nats consumer rm` removes it.
 - The allowlist checks the sink's URL. Knative follows redirects, and a 307 or 308 sends the event on to another host. That is no different from a sink that forwards events itself: the allowlist decides who gets events first-hand.
