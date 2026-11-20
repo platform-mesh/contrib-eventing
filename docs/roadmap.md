@@ -20,10 +20,14 @@ Each milestone ends with something that runs on a local kind setup.
    until then the install script does. Details: [milestone 3](milestone-3.md).
 4. **Installable module.** Published images and chart, install through
    `ManagedProvider`, automatic binding for new orgs, more than one shard,
-   installations other than kind. Providers get a way to publish their own
-   events through the ingress.
-5. **Later.** User created and deleted from the `User` CRD of ADR 018, for any
-   IdP. Org- and account-level subscriptions, kcp resource events.
+   installations other than kind.
+5. **Providers, self-service subscriptions and user events.** Providers
+   publish their own events through the ingress. Orgs, accounts and
+   providers subscribe themselves, and each gets only what it may see: one
+   broker, filters set by the controller, a delivery guard that checks every
+   event again, signed labels. User created and deleted from the `User` CRD of
+   ADR 018, for any IdP. Details: [milestone 5](milestone-5.md).
+6. **Later.** Subscriptions for child accounts, kcp resource events.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
 Kafka and the like run on the subscriber side.
