@@ -84,6 +84,7 @@ linters:
         - nilness # find tautologies / impossible conditions
         - sortslice # check the argument type of sort.Slice
         - unusedwrite # checks for unused writes
+  exclusions:
     paths:
       - third_party$
       - builtin$
@@ -109,7 +110,6 @@ formatters:
         - blank
         - dot
       custom-order: true
-      skip-generated: true
     gofmt:
       rewrite-rules:
         - pattern: 'interface{}'
