@@ -75,7 +75,9 @@ Coming from the old install (namespace `contrib-eventing`, workspace
 2. **The core connection.** Add the entry in
    [`config/install/core-connection.yaml`](config/install/core-connection.yaml)
    to the `PlatformMesh`'s `spec.kcp.extraProviderConnections`. The OpenFGA
-   adapter reads account paths with it.
+   adapter reads account paths with it. The entry is read-only; drop
+   `readOnly` on a platform-mesh-operator from before
+   [platform-mesh#591](https://github.com/platform-mesh/platform-mesh/pull/591).
 3. **Keycloak access** (optional), for login events and names:
    security-operator with
    `--idp-events-reader-client=contrib-eventing-keycloak-reader`

@@ -2,9 +2,12 @@
 # writes a kubeconfig for the core.platform-mesh.io export into Secret
 # contrib-eventing-core, which the OpenFGA adapter reads account paths with.
 # Without it events have no accountPath; set the chart's core.kubeconfigSecret
-# to "" then.
+# to "" then. readOnly limits the connection to get, list and watch, all the
+# adapter needs. It needs a platform-mesh-operator with platform-mesh#591;
+# leave it out on older ones, which then grant all verbs.
 - path: root:platform-mesh-system
   apiExportNames: [core.platform-mesh.io]
   secret: contrib-eventing-core
   namespace: platform-mesh-system
   adminAuth: false
+  readOnly: true
