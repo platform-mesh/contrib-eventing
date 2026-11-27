@@ -10,6 +10,8 @@ spec:
       - io.platform-mesh.iam.membership.revoked.v1alpha1
       - io.platform-mesh.iam.account.members.v1alpha1
       - io.platform-mesh.iam.user.loggedin.v1alpha1
+      - io.platform-mesh.iam.user.created.v1alpha1
+      - io.platform-mesh.iam.user.deleted.v1alpha1
   sink:
     uri: http://event-display.eventing-demo-sink.svc.cluster.local
   delivery:

@@ -69,6 +69,31 @@ func TestEvents(t *testing.T) {
 	assert.Equal(t, "a@example.com", events[1].Details["username"])
 }
 
+func TestEventBefore(t *testing.T) {
+	c := fake(t, func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		assert.Equal(t, "LOGIN", q.Get("type"))
+		assert.Equal(t, "u1", q.Get("user"))
+		assert.Equal(t, "1", q.Get("max"))
+		if q.Get("dateTo") == "1699" {
+			_, _ = fmt.Fprint(w, `[{"id":"e0","time":1500,"type":"LOGIN","userId":"u1"}]`)
+			return
+		}
+		_, _ = fmt.Fprint(w, `[]`)
+	})
+	before, err := c.EventBefore(context.Background(), "acme", "LOGIN", "u1", 1700)
+	require.NoError(t, err)
+	assert.True(t, before, "dateTo is inclusive, so it asks up to 1699")
+	before, err = c.EventBefore(context.Background(), "acme", "LOGIN", "u1", 1500)
+	require.NoError(t, err)
+	assert.False(t, before)
+}
+
+func TestUserID(t *testing.T) {
+	assert.Equal(t, "alice@example.com", UserID("email", "u1", "Alice@Example.com"))
+	assert.Equal(t, "u1", UserID("sub", "u1", "alice@example.com"))
+}
+
 func TestUsers(t *testing.T) {
 	c := fake(t, func(w http.ResponseWriter, r *http.Request) {
 		switch {

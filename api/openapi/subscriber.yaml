@@ -90,7 +90,9 @@ webhooks:
   accountMembers:
     post:
       operationId: accountMembers
-      summary: The members of an account changed; this is the full list now.
+      summary: |
+        The members of an account changed, or one of them logged in for the first time;
+        this is the full list now.
       parameters:
         - $ref: '#/components/parameters/ceSpecversion'
         - $ref: '#/components/parameters/ceId'
@@ -146,6 +148,76 @@ webhooks:
         - $ref: '#/components/parameters/cePmorg'
       requestBody:
         $ref: '#/components/requestBodies/UserLoggedIn'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '408':
+          $ref: '#/components/responses/Retried'
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
+  userCreated:
+    post:
+      operationId: userCreated
+      summary: A user got their first role in an org, an invite included. Derived from OpenFGA until the User resource of ADR 018 exists.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.user.created.v1alpha1
+        - $ref: '#/components/parameters/ceSubjectUser'
+        - name: ce-time
+          in: header
+          required: true
+          description: When the user got the role.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/UserCreated'
+      responses:
+        '2XX':
+          $ref: '#/components/responses/Delivered'
+        '408':
+          $ref: '#/components/responses/Retried'
+        '429':
+          $ref: '#/components/responses/Retried'
+        '5XX':
+          $ref: '#/components/responses/Retried'
+        default:
+          $ref: '#/components/responses/Failed'
+  userDeleted:
+    post:
+      operationId: userDeleted
+      summary: A user's last role in an org was removed. Not a request to purge data, see docs/contract.md.
+      parameters:
+        - $ref: '#/components/parameters/ceSpecversion'
+        - $ref: '#/components/parameters/ceId'
+        - $ref: '#/components/parameters/ceSource'
+        - name: ce-type
+          in: header
+          required: true
+          schema:
+            const: io.platform-mesh.iam.user.deleted.v1alpha1
+        - $ref: '#/components/parameters/ceSubjectUser'
+        - name: ce-time
+          in: header
+          required: true
+          description: When the user's last role was removed.
+          schema:
+            type: string
+            format: date-time
+        - $ref: '#/components/parameters/cePmorg'
+      requestBody:
+        $ref: '#/components/requestBodies/UserDeleted'
       responses:
         '2XX':
           $ref: '#/components/responses/Delivered'
@@ -238,6 +310,32 @@ components:
             org: acme
             user:
               id: alice@example.com
+              email: alice@example.com
+              firstName: Alice
+              lastName: Liddell
+    UserCreated:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserCreated'
+          example:
+            org: acme
+            user:
+              id: alice@example.com
+              email: alice@example.com
+              firstName: Alice
+              lastName: Liddell
+    UserDeleted:
+      required: true
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/UserDeleted'
+          example:
+            org: acme
+            user:
+              id: alice@example.com
     AccountMembers:
       required: true
       content:
@@ -252,11 +350,13 @@ components:
             members:
               - user:
                   id: alice@example.com
+                  email: alice@example.com
                   firstName: Alice
                   lastName: Liddell
                 roles: [owner]
               - user:
                   id: bob@example.com
+                  email: bob@example.com
                 roles: [member]
   responses:
     Delivered:
@@ -318,7 +418,7 @@ components:
             Only there if something went wrong while the snapshot was built. The members list
             is complete anyway.
             `namesUnavailable`: the names could not be read from Keycloak, so no member has
-            one. Keep the names you already have.
+            one, and with the sub claim no email either. Keep the ones you already have.
           items:
             type: string
             enum: [namesUnavailable]
@@ -331,6 +431,36 @@ components:
           description: Org name.
         user:
           $ref: '#/components/schemas/User'
+    UserCreated:
+      type: object
+      required: [org, user]
+      properties:
+        org:
+          type: string
+          description: Org name.
+        user:
+          $ref: '#/components/schemas/User'
+        errors:
+          type: array
+          description: As in AccountMembers.
+          items:
+            type: string
+            enum: [namesUnavailable]
+    UserDeleted:
+      type: object
+      required: [org, user]
+      properties:
+        org:
+          type: string
+          description: Org name.
+        user:
+          type: object
+          required: [id]
+          description: Only the id.
+          properties:
+            id:
+              type: string
+              description: As in User.
     Member:
       type: object
       required: [user, roles]
@@ -349,14 +479,21 @@ components:
         id:
           type: string
           description: |
-            The value Platform Mesh authorizes the user with: the claim the platform admin
-            configured (security-operator --user-claim), email by default. Invitations are
-            written with the email, also with the sub claim.
+            The value Platform Mesh authorizes the user with: the user claim the platform
+            admin configured, email by default, or sub. Invitations are written with the
+            email, also with the sub claim.
+        email:
+          type: string
+          description: |
+            Only in members snapshots, logins and created users. In snapshots and created
+            users with the email claim it is the id; with sub, like firstName. In logins,
+            read from the identity provider when the event is built.
         firstName:
           type: string
           description: |
-            Only in members snapshots, and only if Keycloak knows it and eventing can read
-            it. Up to five minutes old.
+            Only in members snapshots, logins and created users, and only if Keycloak knows
+            it and eventing can read it. In snapshots and created users up to five minutes
+            old, in logins read when the event is built.
         lastName:
           type: string
           description: Like firstName.

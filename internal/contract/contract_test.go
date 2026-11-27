@@ -88,6 +88,31 @@ func TestLoggedIn(t *testing.T) {
 	assert.NotEqual(t, e.ID(), otherOrg.ID())
 }
 
+func TestUserCreatedDeleted(t *testing.T) {
+	at := time.UnixMilli(1760000000123)
+	alice := User{ID: "alice@example.com", Email: "alice@example.com", FirstName: "Alice"}
+	c, err := Created(UserCreated{Org: "acme", User: alice}, "k1", at)
+	require.NoError(t, err)
+	require.NoError(t, c.Validate())
+	assert.Equal(t, TypeUserCreated, c.Type())
+	assert.Equal(t, "users/alice@example.com", c.Subject())
+	assert.Equal(t, "acme", c.Extensions()[OrgExtension])
+	assert.JSONEq(t, `{"org":"acme","user":{"id":"alice@example.com","email":"alice@example.com","firstName":"Alice"}}`, string(c.Data()))
+
+	again, _ := Created(UserCreated{Org: "acme", User: User{ID: "alice@example.com"}, Errors: []SnapshotError{ErrorNamesUnavailable}}, "k1", time.Unix(5, 0))
+	otherOrg, _ := Created(UserCreated{Org: "beta", User: alice}, "k1", at)
+	assert.Equal(t, c.ID(), again.ID(), "one created event per change")
+	assert.Contains(t, string(again.Data()), `"errors":["namesUnavailable"]`)
+	assert.NotEqual(t, c.ID(), otherOrg.ID())
+
+	d, err := Deleted("acme", "alice@example.com", "k1", at)
+	require.NoError(t, err)
+	require.NoError(t, d.Validate())
+	assert.Equal(t, TypeUserDeleted, d.Type())
+	assert.JSONEq(t, `{"org":"acme","user":{"id":"alice@example.com"}}`, string(d.Data()), "only the id")
+	assert.NotEqual(t, c.ID(), d.ID())
+}
+
 func TestSnapshotErrors(t *testing.T) {
 	m := AccountMembers{Org: "acme", Account: "a", AccountID: AccountID("c", "a")}
 	ok, err := MembersSnapshot(m, "k", time.Unix(0, 0))
@@ -101,8 +126,8 @@ func TestSnapshotErrors(t *testing.T) {
 	assert.NotEqual(t, ok.ID(), bad.ID(), "a snapshot with errors is another event")
 }
 
-func TestUserNames(t *testing.T) {
-	b, err := json.Marshal(Member{User: User{ID: "a", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
+func TestUserProfile(t *testing.T) {
+	b, err := json.Marshal(Member{User: User{ID: "a", Email: "ada@example.com", FirstName: "Ada", LastName: "Lovelace"}, Roles: []string{"member"}})
 	require.NoError(t, err)
-	assert.JSONEq(t, `{"user":{"id":"a","firstName":"Ada","lastName":"Lovelace"},"roles":["member"]}`, string(b))
+	assert.JSONEq(t, `{"user":{"id":"a","email":"ada@example.com","firstName":"Ada","lastName":"Lovelace"},"roles":["member"]}`, string(b))
 }

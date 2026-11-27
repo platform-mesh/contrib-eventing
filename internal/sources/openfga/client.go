@@ -90,10 +90,19 @@ func (c *Client) Changes(ctx context.Context, storeID, objectType, token string,
 
 // Read returns every tuple on the given object.
 func (c *Client) Read(ctx context.Context, storeID, object string) ([]TupleKey, error) {
+	return c.read(ctx, storeID, map[string]string{"object": object})
+}
+
+// ReadUser returns every tuple of the user on objects of the given type.
+func (c *Client) ReadUser(ctx context.Context, storeID, user, objectType string) ([]TupleKey, error) {
+	return c.read(ctx, storeID, map[string]string{"user": user, "object": objectType + ":"})
+}
+
+func (c *Client) read(ctx context.Context, storeID string, key map[string]string) ([]TupleKey, error) {
 	var tuples []TupleKey
 	token := ""
 	for {
-		body := map[string]any{"tuple_key": map[string]string{"object": object}, "page_size": 100}
+		body := map[string]any{"tuple_key": key, "page_size": 100}
 		if token != "" {
 			body["continuation_token"] = token
 		}

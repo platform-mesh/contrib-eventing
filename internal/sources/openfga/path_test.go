@@ -18,6 +18,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/platform-mesh/contrib-eventing/internal/contract"
 	"go.platform-mesh.io/golang-commons/logger/testlogger"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -161,10 +162,14 @@ func TestPublishWithPaths(t *testing.T) {
 			_, _ = w.Write([]byte(`{"tuples": []}`))
 			return
 		}
+		if r.URL.Query().Get("continuation_token") == "t1" {
+			_, _ = w.Write([]byte(`{"changes": [], "continuation_token": "t1"}`))
+			return
+		}
 		_, _ = w.Write([]byte(`{"changes": [
 		  {"operation": "TUPLE_OPERATION_WRITE", "timestamp": "2026-10-23T13:43:24Z",
 		   "tuple_key": {"user": "user:alice@example.com", "relation": "assignee", "object": "role:core_platform-mesh_io_account/c-acme/team-a/member"}}
-		]}`))
+		], "continuation_token": "t1"}`))
 	}))
 	defer fga.Close()
 
@@ -174,7 +179,10 @@ func TestPublishWithPaths(t *testing.T) {
 		Paths: paths,
 		Log:   testlogger.New().HideLogOutput().Logger,
 		Publish: func(_ context.Context, e cloudevents.Event) error {
-			data = append(data, string(e.Data()))
+			// User events are about the org, not an account.
+			if e.Type() != contract.TypeUserCreated {
+				data = append(data, string(e.Data()))
+			}
 			return nil
 		},
 	}

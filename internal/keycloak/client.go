@@ -87,6 +87,7 @@ type Event struct {
 type User struct {
 	ID        string `json:"id"`
 	Username  string `json:"username"`
+	Email     string `json:"email"`
 	FirstName string `json:"firstName"`
 	LastName  string `json:"lastName"`
 }
@@ -115,11 +116,23 @@ func (c *Client) Events(ctx context.Context, realm, typ string, fromMillis int64
 	return events, nil
 }
 
+// EventBefore tells whether the user has a stored event of the type from
+// before atMillis.
+func (c *Client) EventBefore(ctx context.Context, realm, typ, userID string, atMillis int64) (bool, error) {
+	// dateTo is inclusive.
+	q := url.Values{"type": {typ}, "user": {userID}, "dateTo": {strconv.FormatInt(atMillis-1, 10)}, "max": {"1"}}
+	var events []Event
+	if err := c.get(ctx, "/admin/realms/"+url.PathEscape(realm)+"/events?"+q.Encode(), &events); err != nil {
+		return false, err
+	}
+	return len(events) > 0, nil
+}
+
 // User reads a user by Keycloak id. found is false if there is no such user.
 func (c *Client) User(ctx context.Context, realm, id string) (User, bool, error) {
 	var u User
 	err := c.get(ctx, "/admin/realms/"+url.PathEscape(realm)+"/users/"+url.PathEscape(id), &u)
-	if isNotFound(err) {
+	if IsNotFound(err) {
 		return User{}, false, nil
 	}
 	if err != nil {
@@ -134,7 +147,7 @@ func (c *Client) UserByUsername(ctx context.Context, realm, username string) (Us
 	q := url.Values{"username": {username}, "exact": {"true"}}
 	var users []User
 	err := c.get(ctx, "/admin/realms/"+url.PathEscape(realm)+"/users?"+q.Encode(), &users)
-	if isNotFound(err) || (err == nil && len(users) == 0) {
+	if IsNotFound(err) || (err == nil && len(users) == 0) {
 		return User{}, false, nil
 	}
 	if err != nil {
@@ -154,7 +167,19 @@ func (e *statusError) Error() string {
 	return fmt.Sprintf("GET %s: %d: %s", e.path, e.status, e.body)
 }
 
-func isNotFound(err error) bool {
+// UserID is the id Platform Mesh has for a Keycloak user under its user claim:
+// the Keycloak id with sub, otherwise the username, which is the email because
+// Platform Mesh creates realms with registrationEmailAsUsername.
+func UserID(claim, keycloakID, username string) string {
+	if claim == "sub" {
+		return keycloakID
+	}
+	return strings.ToLower(username)
+}
+
+// IsNotFound tells whether Keycloak answered 404, for example for a realm that
+// doesn't exist.
+func IsNotFound(err error) bool {
 	var se *statusError
 	return errors.As(err, &se) && se.status == http.StatusNotFound
 }

@@ -55,6 +55,8 @@ spec:
       - io.platform-mesh.iam.membership.revoked.v1alpha1
       - io.platform-mesh.iam.account.members.v1alpha1
       - io.platform-mesh.iam.user.loggedin.v1alpha1
+      - io.platform-mesh.iam.user.created.v1alpha1
+      - io.platform-mesh.iam.user.deleted.v1alpha1
     orgs: [acme]   # optional; without it you get all orgs
   sink:
     uri: http://my-consumer.my-namespace.svc.cluster.local
@@ -99,6 +101,47 @@ flowchart TD
 The Subscription is ready when `READY` is `True`; otherwise `REASON` says what
 is missing. Events start arriving with the next change or login. Deleting the
 Subscription stops delivery.
+
+## Continuous programs
+
+There is no event type for continuous programs. A program is an account like
+any other, created under one fixed parent account per org, for example
+`continuous-programs`. Membership events and member lists already cover it.
+
+A subscriber tells programs apart by the account path:
+
+```
+root:orgs:<org>:continuous-programs:<program>
+```
+
+Anything with the prefix `root:orgs:<org>:continuous-programs:` and exactly one
+more segment is a program. Accounts nested below a program would match the
+prefix too, so check the segment count. Use `accountId` as the key for a
+program, not its name or path: the name can repeat in other orgs, and the
+`accountId` doesn't change.
+
+`accountPath` is missing when eventing never saw the account's workspace, for
+example for an account deleted while the adapter was down. Such an event can't
+be placed by path; keep it by `accountId` if you know the program already, or
+drop it.
+
+If you are moving from a member list event that carries `users` with `id`,
+`email`, `roles`, `first_name` and `last_name` for a program, the
+`account.members` snapshot gives the same:
+
+| Before | Platform Mesh |
+| --- | --- |
+| the program in the subject | `accountPath`, and `accountId` as the key |
+| the tenant | `org`, also in the `pmorg` attribute |
+| full list of `users` | `members`, the full list; keep the one with the latest `time` |
+| `users[].id` | `user.id`, the platform's user claim, the email by default. Not the old user id |
+| `users[].email` | `user.email` |
+| `users[].first_name`, `last_name` | `user.firstName`, `user.lastName`, where Keycloak knows them |
+| `users[].roles` | `roles`, for example `owner` or `member` |
+
+Invited users are in the list from the invite on, with their email as id and no
+names until they log in. Owners of the parent account own the program too, but
+the list only has roles given on the program itself.
 
 ## Limits
 

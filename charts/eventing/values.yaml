@@ -30,8 +30,7 @@ keycloak:
 openfga:
   url: http://openfga.platform-mesh-system.svc.cluster.local:8080
 
-# The claim Platform Mesh uses as user id (security-operator --user-claim):
-# email or sub.
+# The claim Platform Mesh uses as user id: email or sub.
 userClaim: email
 
 # Hosts sinks and dead letter sinks may point at, exact or *.suffix. Empty

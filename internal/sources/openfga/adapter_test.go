@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -63,7 +64,8 @@ var tuples = map[string][]TupleKey{
 	},
 }
 
-// serveRead answers POST /stores/{id}/read from tuples, one tuple per page.
+// serveRead answers POST /stores/{id}/read from tuples, one tuple per page:
+// reads by object, and reads by user of all their tuples on a type.
 func serveRead(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		TupleKey          TupleKey `json:"tuple_key"`
@@ -71,6 +73,9 @@ func serveRead(t *testing.T, w http.ResponseWriter, r *http.Request) {
 	}
 	require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 	all := tuples[req.TupleKey.Object]
+	if req.TupleKey.User != "" {
+		all = userTuples(req.TupleKey.User, req.TupleKey.Object)
+	}
 	i := 0
 	if req.ContinuationToken != "" {
 		i, _ = strconv.Atoi(req.ContinuationToken)
@@ -81,6 +86,25 @@ func serveRead(t *testing.T, w http.ResponseWriter, r *http.Request) {
 		resp["continuation_token"] = strconv.Itoa(i + 1)
 	}
 	require.NoError(t, json.NewEncoder(w).Encode(resp))
+}
+
+// userTuples are the user's tuples on objects starting with prefix, in a fixed
+// order.
+func userTuples(user, prefix string) []TupleKey {
+	objects := make([]string, 0, len(tuples))
+	for o := range tuples {
+		objects = append(objects, o)
+	}
+	sort.Strings(objects)
+	var out []TupleKey
+	for _, o := range objects {
+		for _, k := range tuples[o] {
+			if k.User == user && strings.HasPrefix(k.Object, prefix) {
+				out = append(out, k)
+			}
+		}
+	}
+	return out
 }
 
 func TestPublishNew(t *testing.T) {
@@ -118,7 +142,7 @@ func TestPublishNew(t *testing.T) {
 	assert.Empty(t, st.Token)
 
 	// A failing snapshot holds the page back, too.
-	failAt, published = 3, nil
+	failAt, published = 5, nil
 	_, err = a.publishNew(context.Background(), "acme", &st)
 	require.Error(t, err)
 	assert.Empty(t, st.Token)
@@ -129,7 +153,7 @@ func TestPublishNew(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, moved)
 	assert.Equal(t, "after-page", st.Token)
-	require.Len(t, published, 5, "three changes, then one snapshot per account")
+	require.Len(t, published, 7, "three changes, a user who left and one who joined, then one snapshot per account")
 	for i := range firstTry {
 		assert.Equal(t, firstTry[i].ID(), published[i].ID(), "a retried page keeps its ids")
 	}
@@ -147,16 +171,24 @@ func TestPublishNew(t *testing.T) {
 	assert.Equal(t, contract.TypeMembershipRevoked, published[1].Type())
 	assert.Equal(t, "owner", revoked.Role)
 
+	// new@example.com lost their last role, after it; bob got his first one,
+	// before it. alice was owner already.
+	assert.Equal(t, contract.TypeUserDeleted, published[2].Type())
+	assert.Equal(t, "users/new@example.com", published[2].Subject())
+	assert.Equal(t, contract.TypeUserCreated, published[3].Type())
+	assert.JSONEq(t, `{"org":"acme","user":{"id":"bob@example.com"}}`, string(published[3].Data()))
+	assert.Equal(t, contract.TypeMembershipGranted, published[4].Type())
+
 	// c1/team-a changed twice in the page and gets one snapshot.
-	assert.Equal(t, contract.TypeAccountMembers, published[3].Type())
-	assert.Equal(t, "accounts/c1/team-a", published[3].Subject())
+	assert.Equal(t, contract.TypeAccountMembers, published[5].Type())
+	assert.Equal(t, "accounts/c1/team-a", published[5].Subject())
 	assert.JSONEq(t, `{"org":"acme","account":"team-a","accountId":"c1/team-a","members":[
 		{"user":{"id":"alice@example.com"},"roles":["member","owner"]},
-		{"user":{"id":"bob@example.com"},"roles":["owner"]}]}`, string(published[3].Data()))
+		{"user":{"id":"bob@example.com"},"roles":["owner"]}]}`, string(published[5].Data()))
 	// c2/team-a is gone: no members.
-	assert.Equal(t, contract.TypeAccountMembers, published[4].Type())
-	assert.JSONEq(t, `{"org":"acme","account":"team-a","accountId":"c2/team-a","members":[]}`, string(published[4].Data()))
-	assert.NotEqual(t, published[3].ID(), published[4].ID())
+	assert.Equal(t, contract.TypeAccountMembers, published[6].Type())
+	assert.JSONEq(t, `{"org":"acme","account":"team-a","accountId":"c2/team-a","members":[]}`, string(published[6].Data()))
+	assert.NotEqual(t, published[5].ID(), published[6].ID())
 }
 
 // The ingress took a snapshot but its answer got lost, and the members changed
@@ -180,7 +212,7 @@ func TestSnapshotRetryWithOtherMembers(t *testing.T) {
 	defer srv.Close()
 
 	var published []cloudevents.Event
-	lostAt := 3
+	lostAt := 5
 	a := &Adapter{
 		FGA: &Client{BaseURL: srv.URL, HTTP: srv.Client()},
 		Log: testlogger.New().HideLogOutput().Logger,
@@ -197,15 +229,17 @@ func TestSnapshotRetryWithOtherMembers(t *testing.T) {
 	require.Error(t, err)
 	firstTry := published
 
-	tuples[owners] = saved[:1]
+	// bob is no owner any more. He had no other role, so whether he joined
+	// with the change doesn't change.
+	tuples[owners] = saved[1:]
 	lostAt, published = -1, nil
 	_, err = a.publishNew(context.Background(), "acme", &st)
 	require.NoError(t, err)
-	for i := range 3 {
+	for i := range 5 {
 		assert.Equal(t, firstTry[i].ID(), published[i].ID(), "changes keep their ids")
 	}
-	assert.Equal(t, contract.TypeAccountMembers, published[3].Type())
-	assert.NotEqual(t, firstTry[3].ID(), published[3].ID(), "another list, another snapshot id")
+	assert.Equal(t, contract.TypeAccountMembers, published[5].Type())
+	assert.NotEqual(t, firstTry[5].ID(), published[5].ID(), "another list, another snapshot id")
 }
 
 // fakeFGA serves a list of stores and answers every changelog request with no

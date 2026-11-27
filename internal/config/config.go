@@ -58,12 +58,12 @@ func (c *KCPSetupConfig) AddFlags(fs *pflag.FlagSet) {
 type KeycloakConfig struct {
 	URL string
 	// ClientIDFile and ClientSecretFile are the keys of the mounted Secret, named
-	// like the ones security-operator writes for its clients.
+	// like the ones Platform Mesh writes for its Keycloak clients.
 	ClientIDFile     string
 	ClientSecretFile string
 	// UserClaim is the claim Platform Mesh uses as user id: email or sub.
 	UserClaim string
-	// NameTTL is how long a user's names are remembered.
+	// NameTTL is how long a member's profile is remembered for snapshots.
 	NameTTL time.Duration
 }
 
@@ -82,7 +82,7 @@ func (c *KeycloakConfig) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&c.ClientIDFile, "keycloak-client-id-file", c.ClientIDFile, "file with the id of the client of the master realm that has view-events and view-users")
 	fs.StringVar(&c.ClientSecretFile, "keycloak-client-secret-file", c.ClientSecretFile, "file with the client's secret")
 	fs.StringVar(&c.UserClaim, "user-claim", c.UserClaim, "claim Platform Mesh uses as user id, email or sub")
-	fs.DurationVar(&c.NameTTL, "name-ttl", c.NameTTL, "how long user names are remembered")
+	fs.DurationVar(&c.NameTTL, "name-ttl", c.NameTTL, "how long member profiles are remembered for snapshots")
 }
 
 type KeycloakAdapterConfig struct {

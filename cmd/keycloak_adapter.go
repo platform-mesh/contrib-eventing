@@ -63,10 +63,8 @@ func runKeycloakAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	}
 
 	pub := &publish.Publisher{Client: &http.Client{Timeout: 10 * time.Second}, TokenFile: cfg.TokenFile}
-	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
 	a := &kcadapter.Adapter{
-		KC:         kc,
-		Users:      &keycloak.Users{Client: kc, TTL: cfg.NameTTL},
+		KC:         keycloak.NewClient(ctx, cfg.URL, clientID, secret),
 		SkipRealms: cfg.SkipRealms,
 		UserClaim:  cfg.UserClaim,
 		Kube:       kube,

@@ -22,6 +22,8 @@ const (
 	TypeMembershipRevoked = "io.platform-mesh.iam.membership.revoked.v1alpha1"
 	TypeAccountMembers    = "io.platform-mesh.iam.account.members.v1alpha1"
 	TypeUserLoggedIn      = "io.platform-mesh.iam.user.loggedin.v1alpha1"
+	TypeUserCreated       = "io.platform-mesh.iam.user.created.v1alpha1"
+	TypeUserDeleted       = "io.platform-mesh.iam.user.deleted.v1alpha1"
 
 	// OrgExtension carries the org name, so subscribers can filter without
 	// reading the payload.
@@ -32,8 +34,10 @@ const (
 // user claim the platform admin configured, email by default.
 type User struct {
 	ID string `json:"id"`
-	// FirstName and LastName are set where Keycloak knows them. Only the
-	// member snapshots carry them.
+	// Email, FirstName and LastName are set where the identity provider knows
+	// them. Logins, created users and member snapshots carry them, membership
+	// events and deleted users don't.
+	Email     string `json:"email,omitempty"`
 	FirstName string `json:"firstName,omitempty"`
 	LastName  string `json:"lastName,omitempty"`
 }
@@ -41,6 +45,21 @@ type User struct {
 // UserLoggedIn is a login in one of the org's realms. It has no IP address,
 // session or client.
 type UserLoggedIn struct {
+	Org  string `json:"org"`
+	User User   `json:"user"`
+}
+
+// UserCreated is a user who joined the org: they got their first role in it.
+type UserCreated struct {
+	Org  string `json:"org"`
+	User User   `json:"user"`
+	// Errors is like in AccountMembers.
+	Errors []SnapshotError `json:"errors,omitempty"`
+}
+
+// UserDeleted is a user who left the org: their last role in it was removed.
+// Its user has only the id.
+type UserDeleted struct {
 	Org  string `json:"org"`
 	User User   `json:"user"`
 }
@@ -123,6 +142,19 @@ func MembersSnapshot(m AccountMembers, changeKey string, at time.Time) (cloudeve
 // Keycloak event, so a repeat gives the same event id. at is the login time.
 func LoggedIn(org string, user User, keycloakEventID string, at time.Time) (cloudevents.Event, error) {
 	return newEvent(TypeUserLoggedIn, org, "users/"+user.ID, id(org, "keycloak", keycloakEventID), at, UserLoggedIn{Org: org, User: user})
+}
+
+// Created builds a user created event. changeKey identifies the change that
+// gave the user their first role in the org; the same change always gives the
+// same event id.
+func Created(u UserCreated, changeKey string, at time.Time) (cloudevents.Event, error) {
+	return newEvent(TypeUserCreated, u.Org, "users/"+u.User.ID, id(u.Org, TypeUserCreated, changeKey), at, u)
+}
+
+// Deleted builds a user deleted event, like Created, for the change that took
+// the user's last role. Only the user id is kept.
+func Deleted(org, userID, changeKey string, at time.Time) (cloudevents.Event, error) {
+	return newEvent(TypeUserDeleted, org, "users/"+userID, id(org, TypeUserDeleted, changeKey), at, UserDeleted{Org: org, User: User{ID: userID}})
 }
 
 func newEvent(typ, org, subject, eventID string, at time.Time, data any) (cloudevents.Event, error) {

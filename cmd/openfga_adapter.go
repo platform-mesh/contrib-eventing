@@ -43,6 +43,10 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	if cfg.Namespace == "" {
 		log.Fatal().Msg("POD_NAMESPACE or --namespace must be set")
 	}
+	// Needed without Keycloak, too: under email the member's email is the id.
+	if cfg.UserClaim != "email" && cfg.UserClaim != "sub" {
+		log.Fatal().Str("userClaim", cfg.UserClaim).Msg("--user-claim must be email or sub")
+	}
 	ctrl.SetLogger(log.ComponentLogger("controller-runtime").Logr())
 	ctx, _, shutdown := pmcontext.StartContext(log, cfg, defaultCfg.ShutdownTimeout)
 	defer shutdown()
@@ -61,6 +65,7 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 	a := &openfga.Adapter{
 		FGA:        &openfga.Client{BaseURL: cfg.OpenFGAURL, HTTP: httpClient},
 		SkipStores: cfg.SkipStores,
+		UserClaim:  cfg.UserClaim,
 		Kube:       kube,
 		Namespace:  cfg.Namespace,
 		Interval:   cfg.Interval,
@@ -69,7 +74,10 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			return pub.Publish(ctx, cfg.IngressURL, e)
 		},
 	}
-	a.Names = keycloakNames(ctx, cfg.KeycloakConfig)
+	if kc := keycloakClient(ctx, cfg.KeycloakConfig); kc != nil {
+		a.Profiles = &openfga.KeycloakProfiles{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
+		a.Logins = &openfga.KeycloakLogins{KC: kc, UserClaim: cfg.UserClaim}
+	}
 	if cfg.CoreKubeconfig != "" {
 		coreCfg, err := clientcmd.BuildConfigFromFlags("", cfg.CoreKubeconfig)
 		if err != nil {
@@ -80,24 +88,20 @@ func runOpenFGAAdapter(_ *cobra.Command, _ []string) { // coverage-ignore
 			log.Fatal().Err(err).Msg("unable to watch account paths")
 		}
 	}
-	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Bool("names", a.Names != nil).Msg("starting adapter")
+	log.Info().Str("openfga", cfg.OpenFGAURL).Bool("accountPaths", a.Paths != nil).Str("userClaim", a.UserClaim).Bool("keycloak", a.Profiles != nil).Msg("starting adapter")
 	if err := a.Run(ctx); err != nil {
 		log.Fatal().Err(err).Msg("adapter stopped")
 	}
 }
 
-// keycloakNames reads names from Keycloak if the reader's secret is there. If
-// not, snapshots have no names, which is what an install without Keycloak
-// access gets.
-func keycloakNames(ctx context.Context, cfg config.KeycloakConfig) openfga.NameLookup { // coverage-ignore
+// keycloakClient connects to Keycloak if the reader's secret is there. If not,
+// snapshots have no names and none follow logins, which is what an install
+// without Keycloak access gets.
+func keycloakClient(ctx context.Context, cfg config.KeycloakConfig) *keycloak.Client { // coverage-ignore
 	clientID, secret, err := keycloak.ReadCredentials(cfg.ClientIDFile, cfg.ClientSecretFile)
 	if err != nil {
 		log.Info().Err(err).Msg("no Keycloak access, member snapshots have no names")
 		return nil
 	}
-	if cfg.UserClaim != "email" && cfg.UserClaim != "sub" {
-		log.Fatal().Str("userClaim", cfg.UserClaim).Msg("--user-claim must be email or sub")
-	}
-	kc := keycloak.NewClient(ctx, cfg.URL, clientID, secret)
-	return &openfga.KeycloakNames{Users: &keycloak.Users{Client: kc, TTL: cfg.NameTTL}, UserClaim: cfg.UserClaim}
+	return keycloak.NewClient(ctx, cfg.URL, clientID, secret)
 }

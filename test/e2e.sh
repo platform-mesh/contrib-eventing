@@ -72,6 +72,8 @@ path=$(last_snapshot "$account_id" | jq -r .accountPath)
 # hack/steps/40-demo-org.sh gave the demo user a name in Keycloak.
 names=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"')
 [[ $names == "Eventing Demo" ]] && pass "snapshot has the member's names" || fail "snapshot names: $names"
+email=$(last_snapshot "$account_id" | jq -r --arg u "$DEMO_USER" '.members[] | select(.user.id == $u) | .user.email')
+[[ $email == "$DEMO_USER" ]] && pass "snapshot has the member's email" || fail "snapshot email: $email"
 
 log "An invited user is announced the same way"
 invited=invited-$RANDOM@example.com
@@ -103,12 +105,71 @@ grep -q "subject: users/$DEMO_USER" <<<"$event" && pass "subject users/$DEMO_USE
 grep -q "pmorg: $ORG" <<<"$event" && pass "pmorg" || fail "login pmorg missing"
 grep -q "\"id\": \"$DEMO_USER\"" <<<"$event" && pass "user.id by the configured claim (email)" || fail "login user missing"
 grep -q "\"org\": \"$ORG\"" <<<"$event" && pass "org in the data" || fail "login org missing"
+grep -q "\"email\": \"$DEMO_USER\"" <<<"$event" && pass "email from Keycloak" || fail "login email missing"
+grep -q '"firstName": "Eventing"' <<<"$event" && grep -q '"lastName": "Demo"' <<<"$event" &&
+  pass "names from Keycloak" || fail "login names missing"
 grep -qi 'ipaddress\|sessionid' <<<"$event" && fail "login has an IP address or session id" || pass "no IP address or session id"
 total=$(logins)
 kind_kubectl -n "$NS" rollout restart deploy/eventing-keycloak-adapter >/dev/null
 kind_kubectl -n "$NS" rollout status deploy/eventing-keycloak-adapter --timeout=120s >/dev/null
 sleep 15
 [[ $(logins) == "$total" ]] && pass "no duplicates after a restart" || fail "logins published again"
+
+log "An invited user's first login sends their account's members"
+invited=invited-$RANDOM@example.com
+# member_names <user>: the user's names in the org account's last snapshot.
+member_names() { last_snapshot "$account_id" | jq -r --arg u "$1" '.members[] | select(.user.id == $u) | "\(.user.firstName) \(.user.lastName)"'; }
+listed() { [[ -n $(member_names "$1") ]]; }
+add_member "$invited" member
+wait_for "a snapshot with the invited user" 30 listed "$invited"
+[[ $(member_names "$invited") == "null null" ]] && pass "no names before the first login" || fail "names: $(member_names "$invited")"
+# Accepting an invite leaves the user in Keycloak with names and a password.
+password=$(head -c 18 /dev/urandom | base64 | tr -d '/+=')
+keycloak POST "/admin/realms/$ORG/users" -d "$(jq -nc --arg u "$invited" --arg p "$password" '{username: $u, email: $u,
+  enabled: true, emailVerified: true, firstName: "Invited", lastName: "User", credentials: [{type: "password", value: $p, temporary: false}]}')" >/dev/null
+"$ROOT/hack/login.sh" "$invited" "$password" >/dev/null
+has_names() { [[ $(member_names "$1") == "Invited User" ]]; }
+wait_for "a snapshot with the invited user's names" 60 has_names "$invited"
+pass "snapshot after the first login has the names"
+after=$(snapshots)
+"$ROOT/hack/login.sh" "$invited" "$password" >/dev/null
+sleep 15
+[[ $(snapshots) == "$after" ]] && pass "a second login sends no snapshot" || fail "snapshots after the second login"
+invited_id=$(keycloak GET "/admin/realms/$ORG/users?exact=true&username=$invited" | jq -r '.[0].id')
+keycloak DELETE "/admin/realms/$ORG/users/$invited_id" >/dev/null
+before=$(count revoked)
+add_member --remove "$invited" member
+wait_for "membership.revoked for the invited user" 30 more_than revoked "$before"
+# shellcheck disable=SC2016 # expands in eval
+wait_for "a snapshot without the invited user" 30 eval '! listed "$invited"'
+
+log "Users joining and leaving the org are announced"
+users() { sink_logs | grep -c "type: io.platform-mesh.iam.user.$1" || true; }
+more_users_than() { (($(users "$1") > $2)); }
+last_user_event() { sink_logs | grep -A23 "type: io.platform-mesh.iam.user.$1" | tail -24; }
+# An invite writes the role for the email, before the user exists anywhere.
+joiner=joiner-$RANDOM@example.com
+before_created=$(users created)
+before_deleted=$(users deleted)
+before_revoked=$(count revoked)
+add_member "$joiner" member
+wait_for "user.created at the sink" 30 more_users_than created "$before_created"
+event=$(last_user_event created)
+grep -q "subject: users/$joiner" <<<"$event" && pass "user.created for the invited $joiner" || fail "user.created subject missing"
+grep -q "\"email\": \"$joiner\"" <<<"$event" && pass "user.created has the email" || fail "user.created email missing"
+# A second role and losing one of two say nothing about the org. A user event
+# follows its change right away, so a few seconds after the revoke are enough.
+add_member "$joiner" owner
+add_member --remove "$joiner" member
+wait_for "the revoke of one of two roles" 30 more_than revoked "$before_revoked"
+sleep 5
+[[ $(users created) == $((before_created + 1)) && $(users deleted) == "$before_deleted" ]] &&
+  pass "nothing for a second role or losing one of two" || fail "user events for a second role"
+add_member --remove "$joiner" owner
+wait_for "user.deleted at the sink" 30 more_users_than deleted "$before_deleted"
+event=$(last_user_event deleted)
+grep -q "subject: users/$joiner" <<<"$event" && pass "user.deleted for $joiner" || fail "user.deleted subject missing"
+grep -q '"email"\|"firstName"' <<<"$event" && fail "user.deleted has a profile" || pass "user.deleted has only the id"
 
 log "The reader token has no admin"
 reader_secret=$(kind_kubectl -n "$NS" get secret contrib-eventing-keycloak-reader -o jsonpath='{.data.client_secret}' | base64 -d)

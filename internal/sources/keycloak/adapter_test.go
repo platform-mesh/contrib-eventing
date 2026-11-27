@@ -43,6 +43,8 @@ type fakeKeycloak struct {
 	users map[string]kc.User
 	// down makes everything but the token endpoint answer 503.
 	down bool
+	// usersDown makes only user reads answer 503.
+	usersDown bool
 	// dateFroms records the dateFrom of every events request per realm.
 	dateFroms map[string][]int64
 }
@@ -101,6 +103,10 @@ func (f *fakeKeycloak) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	case len(parts) == 5 && parts[3] == "users":
+		if f.usersDown {
+			http.Error(w, "down", http.StatusServiceUnavailable)
+			return
+		}
 		u, ok := f.users[parts[4]]
 		if !ok {
 			http.Error(w, "not found", http.StatusNotFound)
@@ -137,7 +143,7 @@ type harness struct {
 
 func newHarness(t *testing.T) *harness {
 	f := newFakeKeycloak(t)
-	f.users["u-alice"] = kc.User{ID: "u-alice", Username: "alice@example.com", FirstName: "Alice"}
+	f.users["u-alice"] = kc.User{ID: "u-alice", Username: "alice@example.com", Email: "alice@example.com", FirstName: "Alice", LastName: "Liddell"}
 	return &harness{fake: f, kube: fake.NewClientBuilder().Build(), failAfter: -1, now: time.UnixMilli(1000), claim: ClaimEmail}
 }
 
@@ -148,7 +154,6 @@ func (h *harness) adapter(t *testing.T) *Adapter {
 	client := kc.NewClient(context.Background(), srv.URL, "reader", "s3cret")
 	return &Adapter{
 		KC:         client,
-		Users:      &kc.Users{Client: client},
 		SkipRealms: []string{"master", "welcome"},
 		UserClaim:  h.claim,
 		Kube:       h.kube,
@@ -185,7 +190,7 @@ func TestFirstRunStartsNow(t *testing.T) {
 	assert.Equal(t, []int64{1000}, h.fake.dateFroms["acme"])
 	assert.NotContains(t, h.fake.dateFroms, "master", "master is skipped")
 	assert.NotContains(t, h.fake.dateFroms, "welcome", "welcome is skipped")
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"])
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"])
 
 	// A login after the start is published, with the org, the user and the login time.
 	h.fake.login("acme", "new", 1500, "u-alice")
@@ -196,7 +201,7 @@ func TestFirstRunStartsNow(t *testing.T) {
 	assert.Equal(t, "users/alice@example.com", e.Subject())
 	assert.Equal(t, "acme", e.Extensions()[contract.OrgExtension])
 	assert.Equal(t, int64(1500), e.Time().UnixMilli())
-	assert.JSONEq(t, `{"org":"acme","user":{"id":"alice@example.com"}}`, string(e.Data()))
+	assert.JSONEq(t, `{"org":"acme","user":{"id":"alice@example.com","email":"alice@example.com","firstName":"Alice","lastName":"Liddell"}}`, string(e.Data()))
 
 	// A realm that appears later starts at its beginning.
 	h.published = nil
@@ -224,12 +229,12 @@ func TestInclusiveBoundary(t *testing.T) {
 
 	require.Len(t, h.published, 2, "each once, although Keycloak returns e1 again")
 	assert.NotEqual(t, h.published[0].ID(), h.published[1].ID())
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 2000, Seen: []string{"e1", "e2"}}, loadedState(t, a)["acme"])
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 2000, Seen: []string{"e1", "e2"}}}, loadedState(t, a)["acme"])
 
 	h.fake.login("acme", "e3", 2001, "u-alice")
 	require.NoError(t, a.poll(ctx))
 	require.Len(t, h.published, 3)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 2001, Seen: []string{"e3"}}, loadedState(t, a)["acme"], "seen starts again when time moves on")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 2001, Seen: []string{"e3"}}}, loadedState(t, a)["acme"], "seen starts again when time moves on")
 }
 
 func TestManyPages(t *testing.T) {
@@ -267,7 +272,7 @@ func TestFailedPageDoesNotMoveCursor(t *testing.T) {
 	h.failAfter = 1
 	require.NoError(t, a.poll(ctx), "a publish error is logged and retried, not a failed poll")
 	require.Len(t, h.published, 1)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "the cursor stays")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "the cursor stays")
 	firstTry := h.published[0].ID()
 
 	h.failAfter, h.published = -1, nil
@@ -314,12 +319,15 @@ func TestRecreatedRealmStartsOver(t *testing.T) {
 }
 
 func TestUserClaim(t *testing.T) {
+	alice := contract.User{Email: "alice@example.com", FirstName: "Alice", LastName: "Liddell"}
 	for _, tc := range []struct {
-		name, claim, userID, want string
+		name, claim, userID string
+		want                contract.User
 	}{
-		{"email is the username", ClaimEmail, "u-alice", "alice@example.com"},
-		{"sub is the Keycloak id", ClaimSub, "u-alice", "u-alice"},
-		{"a deleted user falls back to the recorded username", ClaimEmail, "u-deleted", "alice@example.com"},
+		{"email is the username", ClaimEmail, "u-alice", contract.User{ID: "alice@example.com", Email: alice.Email, FirstName: alice.FirstName, LastName: alice.LastName}},
+		{"sub is the Keycloak id", ClaimSub, "u-alice", contract.User{ID: "u-alice", Email: alice.Email, FirstName: alice.FirstName, LastName: alice.LastName}},
+		{"a deleted user keeps the recorded username and has no profile", ClaimEmail, "u-deleted", contract.User{ID: "alice@example.com"}},
+		{"a deleted user under sub keeps the Keycloak id", ClaimSub, "u-deleted", contract.User{ID: "u-deleted"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
@@ -332,10 +340,35 @@ func TestUserClaim(t *testing.T) {
 			require.Len(t, h.published, 1)
 			var data contract.UserLoggedIn
 			require.NoError(t, json.Unmarshal(h.published[0].Data(), &data))
-			assert.Equal(t, tc.want, data.User.ID)
-			assert.Equal(t, "users/"+tc.want, h.published[0].Subject())
+			assert.Equal(t, tc.want, data.User)
+			assert.Equal(t, "users/"+tc.want.ID, h.published[0].Subject())
 		})
 	}
+}
+
+// A login whose user can't be read waits; it never goes out without its
+// profile.
+func TestUserReadFails(t *testing.T) {
+	h := newHarness(t)
+	h.fake.addRealm("acme", "id-acme")
+	a := h.adapter(t)
+	ctx := context.Background()
+	require.NoError(t, a.poll(ctx))
+	h.fake.login("acme", "e1", 2000, "u-alice")
+
+	h.fake.mu.Lock()
+	h.fake.usersDown = true
+	h.fake.mu.Unlock()
+	require.NoError(t, a.poll(ctx), "logged per realm, not a failed poll")
+	assert.Empty(t, h.published)
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "the cursor stays")
+
+	h.fake.mu.Lock()
+	h.fake.usersDown = false
+	h.fake.mu.Unlock()
+	require.NoError(t, a.poll(ctx))
+	require.Len(t, h.published, 1, "the login goes out on the next poll")
+	assert.Contains(t, string(h.published[0].Data()), `"firstName":"Alice"`)
 }
 
 func TestLoginWithoutUserIsDropped(t *testing.T) {
@@ -380,7 +413,7 @@ func TestKeycloakOutage(t *testing.T) {
 	h.fake.mu.Unlock()
 	require.Error(t, a.poll(ctx), "an unreachable Keycloak fails the poll")
 	assert.Empty(t, h.published)
-	assert.Equal(t, realmState{RealmID: "id-acme", Since: 1000}, loadedState(t, a)["acme"], "state is untouched")
+	assert.Equal(t, realmState{RealmID: "id-acme", Cursor: kc.Cursor{Since: 1000}}, loadedState(t, a)["acme"], "state is untouched")
 
 	h.fake.mu.Lock()
 	h.fake.down = false

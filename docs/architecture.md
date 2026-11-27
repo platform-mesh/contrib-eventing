@@ -6,7 +6,7 @@ This page explains the parts of the eventing module and how an event travels thr
 
 Eventing tells other systems when something changes in the platform, so they don't have to poll for it.
 
-- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account (OpenFGA changelog) and who logged in (Keycloak event store). After a membership change it also sends the full member list of the account, with names from Keycloak where it has access, so a consumer can catch up even if it missed events.
+- **Sources.** An adapter watches a system of record and turns each change into an event. Today that is who is a member of which account and who joined or left an org (OpenFGA changelog), and who logged in (Keycloak event store). After a membership change it also sends the full member list of the account, with names from Keycloak where it has access, so a consumer can catch up even if it missed events.
 - **Events.** Every event has the same shape: a type, an id, the org it belongs to, and the data (CloudEvents over HTTP, see the [contract](contract.md)).
 - **Ingress.** All events enter through one front door. It checks who is sending before it accepts anything (Kubernetes token review, behind the platform's Gateway).
 - **Broker.** The broker stores each event before it says "accepted", so a restart loses nothing (Knative Eventing with a NATS JetStream channel). It keeps events for a day.
@@ -42,7 +42,7 @@ flowchart LR
   fga -- changelog and members --> adapter
   info -. "watched through core.platform-mesh.io" .-> adapter
   kc -- "login events, names" --> kcadapter
-  kc -. "names, optional" .-> adapter
+  kc -. "names and logins, optional" .-> adapter
   kcadapter -- events --> ing
   adapter -- events --> ing
   ing -- checked sender --> bi
@@ -60,7 +60,7 @@ Knative be reached only from the part before it (see
 
 | Part | What it does | Who builds it |
 | --- | --- | --- |
-| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account. If it can reach Keycloak (`view-users`), the snapshot has first and last names | us |
+| OpenFGA adapter | Reads the OpenFGA changelog and turns membership changes into events, plus a snapshot of the members of each changed account and an event when a user joins or leaves the org. With Keycloak access it also sends the snapshots of a user's accounts after their first login. If it can reach Keycloak (`view-users`), the snapshot has emails and first and last names; with the `email` claim the emails are always there | us |
 | Keycloak adapter | Reads the login events stored by each org realm and turns them into `user.loggedin` events. Its Keycloak client only has `view-events` and `view-users` | us |
 | Ingress | Checks who is sending, then hands the event to the broker. Reachable through the platform's Gateway | us |
 | Subscription API | A kcp resource for platform admins in the eventing workspace: event types, optional orgs, target URL, retry settings | us |
@@ -107,14 +107,34 @@ sequenceDiagram
 4. A Subscription asked for membership events (of all orgs, or of `acme`). Its Trigger matches, and Knative sends the event to the subscriber's URL.
 5. If the subscriber does not answer with success, Knative retries with backoff. After the last attempt the event goes to a dead letter sink, if one is set.
 
+If Alice had no role in `acme` before, the adapter also sends `user.created`
+with the grant; when her last role goes, `user.deleted` follows the revoke. It
+reads her roles in the org's store after the end of the changelog and goes back
+through the new changes, so a change read again after a restart gives the same
+answer. For that it holds the unread changelog in memory, which after a long
+downtime can be large. If the roles can't be read, or the changelog keeps
+moving while they are read, nothing of that org goes out and the next poll
+tries the same changes again. If a change doesn't fit her current roles, the
+adapter logs a warning. This stands in until the `User` resource of ADR 018 exists.
+
 ### A login
 
 The Keycloak adapter works the same way, with Keycloak's event store instead of a changelog. Example: Alice logs in to the portal of org `acme`.
 
 1. Keycloak stores a `LOGIN` event in the realm `acme`. The install switches the store on for logins only, and the events are kept for seven days.
 2. The Keycloak adapter polls the stored events of every org realm (not `master` or `welcome`). Each realm has a cursor, the time of the last event it published, kept in a ConfigMap. Keycloak includes events at exactly that time, so the cursor also keeps the ids of the events at that time it has already sent.
-3. For each new event it looks up the user to get the id the platform's user claim has (the email by default, the Keycloak id with `sub`), builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. The cursor only moves after every event of a page was accepted.
+3. For each new event it reads the user from Keycloak, uncached, for the id the platform's user claim has (the email by default, the Keycloak id with `sub`) and the email and names. It builds a `user.loggedin` event ([contract](contract.md)) and posts it to the ingress. If the read fails, the page waits for the next poll. The cursor only moves after every event of a page was accepted.
 4. From the ingress on, the event travels like any other.
+
+The OpenFGA adapter reads the same logins with its own cursor, kept with its
+changelog token. For each login it asks Keycloak whether the user has an
+earlier stored login. If not, it reads the user's roles from OpenFGA and sends
+a members snapshot of each of their accounts. Someone invited by email is in
+OpenFGA from the invite on, but has names only after they logged in, which
+OpenFGA doesn't see. Each poll reads the changelogs of all orgs first and the
+logins after, all orgs together within 30 seconds, so a slow or unreachable
+Keycloak only delays the logins. Logins it doesn't get to wait for the next
+poll.
 
 ## Tenancy
 
