@@ -6,9 +6,9 @@ Goal: a first consumer can use eventing
 ## What the first consumer needs
 
 Their own fork of iam-service publishes the full member list of an account,
-with names, after every membership change and after every login. That is on
-purpose: a missed event doesn't matter, because the next one carries the whole
-list. Their subscribers resync through an API when they need to. They can't
+with names, after every membership change and after a login that accepts an
+invite. That is on purpose: a missed event doesn't matter, because the next one
+carries the whole list. Their subscribers resync through an API when they need to. They can't
 say whether names or ordering are used, because they don't know all their
 subscribers.
 

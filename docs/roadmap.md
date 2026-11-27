@@ -18,13 +18,22 @@ Each milestone ends with something that runs on a local kind setup.
    store and read-only Keycloak access
    ([platform-mesh#578](https://github.com/platform-mesh/platform-mesh/issues/578));
    until then the install script does. Details: [milestone 3](milestone-3.md).
-4. **Installable module and provider events.** Published images, chart and
-   OCM component, install through `ManagedProvider` on any Platform Mesh, CI.
-   Providers publish their own events through the ingress. Details:
+4. **Installable module.** Published images, chart and OCM component,
+   install through `ManagedProvider` on any Platform Mesh, CI. Details:
    [milestone 4](milestone-4.md).
-5. **Later.** User created and deleted from the `User` CRD of ADR 018, for any
-   IdP. Org- and account-level subscriptions, kcp resource events, more than
-   one kcp shard.
+5. **Everything the first consumer's fork sends.** Email and names in logins
+   and member lists, member lists on first login, continuous programs as
+   accounts, and the contract for user created and deleted. Details:
+   [milestone 5](milestone-5.md).
+6. **Provider events.** Providers publish their own events through the
+   ingress ([#14](https://github.com/platform-mesh/contrib-eventing/issues/14)).
+   Runs in parallel with milestone 5. Also proposed there, decided at the
+   checkpoint: org isolation with a delivery guard, org- and account-level
+   subscriptions, providers receiving events. Details:
+   [milestone 6](milestone-6.md).
+7. **Later.** Sending user created and deleted from the `User` CRD of ADR 018,
+   for any IdP. Org- and account-level subscriptions, kcp resource events,
+   more than one kcp shard.
 
 Delivery stays HTTP to the subscriber in all of these. Bridges to GCP Pub/Sub,
 Kafka and the like run on the subscriber side.

@@ -92,8 +92,8 @@ security-operator, so its owners have to agree.
      subscribers have to cope with events without an org.
 
    **Proposal: a)**, `master` is skipped as well.
-4. **User created and deleted.** The first consumer's fork sends after
-   membership changes and logins, not when users are created or deleted.
+4. **User created and deleted.** The first consumer's fork also sends them,
+   from its own user table (see [milestone 5](milestone-5.md)).
    - a) Logins only in this milestone.
    - b) All three.
 
@@ -119,7 +119,8 @@ security-operator, so its owners have to agree.
    **Decided: c)**: provider publishing and the installable module both go
    into milestone 4, as two parts with their own issues that can run in
    parallel. Provider publishing starts with its own ADR. See
-   [milestone 4](milestone-4.md).
+   [milestone 4](milestone-4.md). Provider publishing later became its own
+   milestone 6, see the [roadmap](roadmap.md).
 
 ## Order
 

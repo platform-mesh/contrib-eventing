@@ -1,18 +1,18 @@
 # Milestone 4
 
 Goal: someone outside the team installs eventing on their own Platform Mesh
-from a release and tries it, and providers can publish their own events.
+from a release and tries it.
 
-This is the last milestone of the eventing epic. Tenant-scoped subscriptions
-are not part of the epic: milestone 2 decided on subscriptions for platform
-admins, filtered by org.
+Tenant-scoped subscriptions are not part of the epic: milestone 2 decided on
+subscriptions for platform admins, filtered by org.
 
-Two parts with their own issues: the installable module
-([#13](https://github.com/platform-mesh/contrib-eventing/issues/13)) and
-provider publishing
-([#14](https://github.com/platform-mesh/contrib-eventing/issues/14)). They
-don't depend on each other and can run in parallel. This answers decision 6
-of [milestone 3](milestone-3.md).
+The installable module has its own issue
+([#13](https://github.com/platform-mesh/contrib-eventing/issues/13)).
+Provider publishing
+([#14](https://github.com/platform-mesh/contrib-eventing/issues/14)) was
+planned as a second part here (decision 6 of [milestone 3](milestone-3.md))
+and is now milestone 6 of the [roadmap](roadmap.md), since it is big enough
+for its own milestone.
 
 It builds on milestone 3 (least privilege for the Keycloak adapter).
 
@@ -29,9 +29,7 @@ The roadmap also lists automatic binding for new orgs. Nothing needs binding
 today: Subscriptions live in the eventing workspace, and the adapters read
 all orgs. Binding comes back with org-level subscriptions (later).
 
-## Part 1: installable module
-
-### How Platform Mesh installs a provider
+## How Platform Mesh installs a provider
 
 A `ManagedProvider` (providers.platform-mesh.io, on the runtime cluster) is
 the platform's way to onboard a service of its own. platform-mesh-operator
@@ -50,7 +48,7 @@ by default. The Tilt setup for development switches both off.
 needs for account paths (milestone 2). That stays an
 `extraProviderConnections` entry, see decision 2.
 
-### Work
+## Work
 
 1. **CI.** Build, unit tests, lint and the kind e2e on every pull request.
 2. **Images.** Multi-arch images to ghcr on every tag.
@@ -75,7 +73,7 @@ needs for account paths (milestone 2). That stays an
 8. **Docs.** An install guide in the README, including what delivery does
    and does not guarantee.
 
-### Decisions
+## Decisions
 
 1. **Knative and NATS.** Eventing needs Knative Eventing for itself, because
    it locks down the broker ingress that all Brokers share, and NATS
@@ -115,26 +113,16 @@ needs for account paths (milestone 2). That stays an
    in `platform-mesh-system`, next to the platform. Names get an `eventing-`
    prefix, the NetworkPolicies stay in `knative-eventing`.
 
-## Part 2: providers publish their own events
-
-Today only the platform's own adapters may publish through the ingress. A
-short ADR comes first: how a provider authenticates to the ingress, how it
-declares the event types it publishes, and how the ingress limits it to orgs
-that bound its APIExport. The ingress sets the org itself, never from the
-event. Then the ingress change, a sample provider that publishes one event,
-an e2e that also shows what a provider may not send, and a short guide for
-providers. Details in the ADR.
-
 ## Order
 
 1. CI and images, they need no decisions.
-2. The ADR for part 2, in parallel.
-3. Chart with the kcp setup, then the OCM component and the
+2. Chart with the kcp setup, then the OCM component and the
    `ManagedProvider` install.
-4. Least privilege once platform-mesh#577 and #578 are released.
-5. `hack/install.sh` on the chart, e2e in CI on the `ManagedProvider` path.
-6. Before the first release, one manual run on a kcp with two shards. CI has
+3. Least privilege once platform-mesh#577 and #578 are released.
+4. `hack/install.sh` on the chart, e2e in CI on the `ManagedProvider` path.
+5. Before the first release, one manual run on a kcp with two shards. CI has
    one shard, and the adapter's `AccountInfo` watch should follow every shard.
 
-Not in this milestone: more than one kcp shard in CI, providers receiving
-events, org and account level subscriptions.
+Not in this milestone: provider publishing (milestone 6), more than one kcp
+shard in CI, providers receiving events, org and account level
+subscriptions.
